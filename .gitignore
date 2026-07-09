@@ -1,0 +1,33 @@
+node_modules/
+.expo/
+dist/
+web-build/
+*.log
+.DS_Store
+.agents/
+.claude/
+.codex/
+image/
+
+# 个人笔记 / 待办（不对外公开）
+todo.md
+NOTES.md
+TROUBLESHOOTING.md
+
+# Android build artifacts
+android/build/
+android/.gradle/
+android/.kotlin/
+android/app/build/
+android/app/.cxx/
+android/.idea/
+android/local.properties
+*.iml
+
+# Keystore (debug is generic; never commit release keystore)
+*.keystore
+*.jks
+android/keystore.properties
+
+# Expo / EAS
+.easignore
