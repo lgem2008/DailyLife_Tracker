@@ -5,8 +5,7 @@ import {
 import Constants from 'expo-constants';
 import { colors, getShadow, createThemedStyles } from '../theme';
 
-// GitHub 仓库信息：建好仓库后把 owner/repo 换成真实的
-const GITHUB_OWNER = 'your-github-name';
+const GITHUB_OWNER = 'lgem2008';
 const GITHUB_REPO = 'DailyLife_Tracker';
 const RELEASES_PAGE = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
