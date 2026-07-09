@@ -10,6 +10,20 @@ const GITHUB_REPO = 'DailyLife_Tracker';
 const RELEASES_PAGE = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 
+const API_MIRRORS = [
+  LATEST_RELEASE_API,
+  `https://ghproxy.net/https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+  `https://gh-proxy.com/https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+];
+
+const DOWNLOAD_PROXY = 'https://ghproxy.net/';
+
+function fetchWithTimeout(url, opts = {}, ms = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
 
 // 把 "v1.2.3" / "1.2.3" 解析成可比较的数字数组
@@ -55,16 +69,28 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
     setChecking(true);
     setStatus(null);
     try {
-      const res = await fetch(LATEST_RELEASE_API, {
-        headers: { Accept: 'application/vnd.github+json' },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      let data = null;
+      for (const api of API_MIRRORS) {
+        try {
+          const res = await fetchWithTimeout(api, {
+            headers: { Accept: 'application/vnd.github+json' },
+          });
+          if (!res.ok) continue;
+          data = await res.json();
+          break;
+        } catch (_) {
+          continue;
+        }
+      }
+      if (!data) throw new Error('all mirrors failed');
       const tag = data?.tag_name || '';
       const apkAsset = (data?.assets || []).find(
         (a) => typeof a?.name === 'string' && a.name.toLowerCase().endsWith('.apk'),
       );
-      const url = apkAsset?.browser_download_url || data?.html_url || RELEASES_PAGE;
+      let url = apkAsset?.browser_download_url || data?.html_url || RELEASES_PAGE;
+      if (url.includes('github.com') && DOWNLOAD_PROXY) {
+        url = DOWNLOAD_PROXY + url;
+      }
       setLatestVersion(tag);
       setDownloadUrl(url);
       setStatus(compareVersion(tag, APP_VERSION) > 0 ? 'update' : 'latest');
