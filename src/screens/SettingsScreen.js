@@ -223,13 +223,26 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
       )}
 
       <View style={[styles.card, getShadow(), styles.cardSpaced]}>
-        <View style={styles.cardHead}>
-          <View style={styles.cardBody}>
-            <Text style={styles.cardTitle}>检查更新</Text>
-            <Text style={styles.cardDesc}>
-              当前版本 v{APP_VERSION}。点右侧按钮从 GitHub 查看是否有新版本。
-            </Text>
-          </View>
+        <Text style={styles.cardTitle}>关于</Text>
+        <Text style={styles.cardDesc}>
+          日常记录 · 一个可爱风的日常打卡与健身记录小工具。数据全部存在手机本地，不联网、不登录。
+        </Text>
+
+        <Pressable style={styles.aboutRow} onPress={() => openUrl(AUTHOR_URL)}>
+          <Text style={styles.aboutLabel}>作者</Text>
+          <Text style={styles.aboutValue}>{AUTHOR}</Text>
+          <Text style={styles.aboutArrow}>›</Text>
+        </Pressable>
+
+        <Pressable style={styles.aboutRow} onPress={() => openUrl(REPO_URL)}>
+          <Text style={styles.aboutLabel}>开源仓库</Text>
+          <Text style={styles.aboutValue} numberOfLines={1}>GitHub</Text>
+          <Text style={styles.aboutArrow}>›</Text>
+        </Pressable>
+
+        <View style={styles.aboutRow}>
+          <Text style={styles.aboutLabel}>版本</Text>
+          <Text style={styles.aboutValue}>v{APP_VERSION}</Text>
           <Pressable
             style={[styles.checkBtn, checking && styles.checkBtnDisabled]}
             onPress={checkUpdate}
@@ -237,7 +250,7 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
           >
             {checking
               ? <ActivityIndicator size="small" color={colors.primary} />
-              : <Text style={styles.checkBtnText}>检查</Text>}
+              : <Text style={styles.checkBtnText}>检查更新</Text>}
           </Pressable>
         </View>
 
@@ -263,30 +276,6 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
             )}
           </Pressable>
         )}
-      </View>
-
-      <View style={[styles.card, getShadow(), styles.cardSpaced]}>
-        <Text style={styles.cardTitle}>关于</Text>
-        <Text style={styles.cardDesc}>
-          日常记录 · 一个可爱风的日常打卡与健身记录小工具。数据全部存在手机本地，不联网、不登录。
-        </Text>
-
-        <Pressable style={styles.aboutRow} onPress={() => openUrl(AUTHOR_URL)}>
-          <Text style={styles.aboutLabel}>作者</Text>
-          <Text style={styles.aboutValue}>{AUTHOR}</Text>
-          <Text style={styles.aboutArrow}>›</Text>
-        </Pressable>
-
-        <Pressable style={styles.aboutRow} onPress={() => openUrl(REPO_URL)}>
-          <Text style={styles.aboutLabel}>开源仓库</Text>
-          <Text style={styles.aboutValue} numberOfLines={1}>GitHub</Text>
-          <Text style={styles.aboutArrow}>›</Text>
-        </Pressable>
-
-        <View style={styles.aboutRow}>
-          <Text style={styles.aboutLabel}>版本</Text>
-          <Text style={styles.aboutValue}>v{APP_VERSION}</Text>
-        </View>
       </View>
     </ScrollView>
   );
@@ -327,10 +316,10 @@ const styles = createThemedStyles((colors) => ({
     alignSelf: 'flex-end',
     backgroundColor: colors.primary,
   },
-  swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 14 },
-  swatchItem: { alignItems: 'center', width: 56 },
+  swatchRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14 },
+  swatchItem: { alignItems: 'center', flex: 1, minWidth: 0, paddingHorizontal: 2 },
   swatchDot: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 38, height: 38, borderRadius: 19,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: 'transparent',
   },

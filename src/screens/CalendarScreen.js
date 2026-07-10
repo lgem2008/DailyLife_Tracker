@@ -196,11 +196,17 @@ export default function CalendarScreen({
   onDeleteWorkouts,
   onUpdateWorkout,
   onUpdateActivity,
+  onLockPager,
 }) {
   const today = todayKey();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
+  // PanResponder 只创建一次，用 ref 读取当前年月，避免闭包捕获旧值
+  const yearRef = useRef(year);
+  const monthRef = useRef(month);
+  yearRef.current = year;
+  monthRef.current = month;
   const [selected, setSelected] = useState(today);
   const [expanded, setExpanded] = useState(false);
   const [selectedBatchKeys, setSelectedBatchKeys] = useState([]);
@@ -217,32 +223,39 @@ export default function CalendarScreen({
     }).start();
   }, [expanded, expandAnim]);
 
+  const stepMonth = (dir) => {
+    const m = monthRef.current;
+    const y = yearRef.current;
+    if (dir > 0) {
+      if (m === 11) { setYear(y + 1); setMonth(0); } else setMonth(m + 1);
+    } else if (m === 0) { setYear(y - 1); setMonth(11); } else setMonth(m - 1);
+  };
+
+  const lockPager = () => { if (onLockPager) onLockPager(false); };
+  const releasePager = () => { if (onLockPager) onLockPager(true); };
+
   const calendarPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gs) => {
-        const absX = Math.abs(gs.dx);
-        const absY = Math.abs(gs.dy);
-        return absX > 15 || absY > 15;
-      },
-      onMoveShouldSetPanResponderCapture: (_, gs) => {
-        const absX = Math.abs(gs.dx);
-        const absY = Math.abs(gs.dy);
-        return absX > 15 || absY > 15;
-      },
+      // 在网格上移动超过阈值就抢下手势，避免被外层横向翻页吞掉
+      onMoveShouldSetPanResponder: (_, gs) => (Math.abs(gs.dx) > 12 || Math.abs(gs.dy) > 12),
+      onMoveShouldSetPanResponderCapture: (_, gs) => (Math.abs(gs.dx) > 12 || Math.abs(gs.dy) > 12),
+      // 真正抢到手势后才锁外层翻页，保证一定有对应的释放
+      onPanResponderGrant: lockPager,
       onPanResponderRelease: (_, gs) => {
+        releasePager();
         const absX = Math.abs(gs.dx);
         const absY = Math.abs(gs.dy);
 
         if (absX >= 42 && absX > absY * 1.2) {
-          if (gs.dx < 0) nextMonth();
-          else prevMonth();
+          stepMonth(gs.dx < 0 ? 1 : -1);
           return;
         }
 
         if (absY < 24 || absY <= absX * 1.2) return;
         setExpanded(gs.dy > 0);
       },
+      onPanResponderTerminate: releasePager,
       onPanResponderTerminationRequest: () => false,
     })
   ).current;

@@ -1759,8 +1759,8 @@ export default function FitnessScreen({
   const exList = (part && exercises && exercises[part.key]) || [];
   const exerciseMode = exercise && part ? getExerciseMode(settings, part.key, exercise) : DEFAULT_EXERCISE_MODE;
   const noWeight = exercise ? !exerciseMode.weight : false;
-  const exerciseLayout = settings?.fitnessExerciseLayout === 'grid' ? 'grid' : 'list';
-  const showExerciseGrid = exerciseLayout === 'grid' && !editMode;
+  // 动作列表固定为列表视图（网格开关已去掉）
+  const showExerciseGrid = false;
   const exerciseContentWidth = Math.max(0, Math.min(460, viewportWidth) - 28);
   const exerciseGridCols = 3;
   const exerciseTileWidth = Math.max(
@@ -1774,15 +1774,6 @@ export default function FitnessScreen({
     72,
     Math.floor((exerciseContentWidth - GAP * (partGridCols - 1)) / partGridCols),
   );
-
-  const toggleExerciseLayout = useCallback(() => {
-    if (!onChangeSettings) return;
-    select();
-    onChangeSettings({
-      ...settings,
-      fitnessExerciseLayout: exerciseLayout === 'grid' ? 'list' : 'grid',
-    });
-  }, [settings, onChangeSettings, exerciseLayout]);
 
   const togglePartLayout = useCallback(() => {
     if (!onChangeSettings) return;
@@ -1822,10 +1813,13 @@ export default function FitnessScreen({
       removeExerciseMode(part.key, oldName);
     }
     saveExerciseMode(part.key, nextName, customMode);
+    const savedMode = customMode;
     setEditingExercise(null);
     setCreateOpen(false);
     setCustomEx('');
     setCustomMode(DEFAULT_EXERCISE_MODE);
+    // 保存后回到记录面板，而不是直接把面板撤走
+    openExercise(nextName, savedMode);
   };
 
   const confirmDeleteExercise = (name) => {
@@ -1949,12 +1943,9 @@ export default function FitnessScreen({
       >
         <View style={styles.homeHead}>
           <Text style={styles.title}>健身</Text>
-          <Pressable
-            style={[styles.layoutBtn, showPartGrid && styles.layoutBtnActive]}
-            onPress={togglePartLayout}
-          >
-            <Text style={[styles.layoutBtnText, showPartGrid && styles.layoutBtnTextActive]}>
-              {showPartGrid ? '☰' : '▦'}
+          <Pressable style={styles.layoutBtn} onPress={togglePartLayout}>
+            <Text style={styles.layoutBtnText}>
+              {showPartGrid ? '☰' : '⊞'}
             </Text>
           </Pressable>
         </View>
@@ -2013,7 +2004,7 @@ export default function FitnessScreen({
             setBwOpen(true);
           }}
         >
-          <View style={[styles.partRow, styles.bwRow, getShadow()]}>
+          <View style={[styles.partRow, styles.bwRow, showPartGrid && styles.bwRowGrid, getShadow()]}>
             <Text style={styles.partEmoji}>⚖️</Text>
             <Text style={styles.partLabel}>体重</Text>
             {bwSummary && (
@@ -2068,16 +2059,6 @@ export default function FitnessScreen({
               <Text style={styles.backText}>‹ 部位</Text>
             </Pressable>
             <View style={styles.l2Actions}>
-              {exList.length > 0 && !editMode && (
-                <Pressable
-                  style={[styles.layoutBtn, showExerciseGrid && styles.layoutBtnActive]}
-                  onPress={toggleExerciseLayout}
-                >
-                  <Text style={[styles.layoutBtnText, showExerciseGrid && styles.layoutBtnTextActive]}>
-                    {showExerciseGrid ? '☰' : '▦'}
-                  </Text>
-                </Pressable>
-              )}
               {exList.length > 0 && (
                 <Pressable
                   style={[styles.editBtn, editMode && styles.editBtnActive]}
@@ -2239,6 +2220,7 @@ const styles = createThemedStyles((colors) => ({
   bwHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   bwTitle: { fontSize: 15, fontWeight: '800', color: colors.text },
   bwRow: { backgroundColor: getTileColor('#DCD3F2'), marginTop: 0 },
+  bwRowGrid: { marginTop: 8 },
   bwHistTitle: { fontSize: 15, fontWeight: '800', color: colors.text, marginBottom: 4 },
   bwEmpty: { fontSize: 13, color: colors.textSoft, marginTop: 2 },
   bwInputRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },

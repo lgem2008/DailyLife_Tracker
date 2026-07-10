@@ -30,6 +30,9 @@ export default function App() {
   const [settings, setSettings] = useState({ fitnessPriorityMode: false, darkMode: false });
   const [loading, setLoading] = useState(true);
   const [fitnessResetSignal, setFitnessResetSignal] = useState(0);
+  // 切换模式后待执行的分页滚动目标（等 pager 按新页数重新测量后再滚，避免被旧宽度夹断）
+  // 日历页在网格上按下时临时锁定横向翻页，把左右滑动让给"切换月份"
+  const [pagerEnabled, setPagerEnabled] = useState(true);
 
   // 提示条
   const [toast, setToast] = useState('');
@@ -81,10 +84,6 @@ export default function App() {
     });
   }, []);
 
-  useEffect(() => {
-    if (settings.fitnessPriorityMode && tab === 'home') setTab('fitness');
-  }, [settings, tab]);
-
   const tabs = settings.fitnessPriorityMode
     ? [
       { key: 'fitness', label: '健身', icon: '🏋️' },
@@ -97,6 +96,15 @@ export default function App() {
       { key: 'calendar', label: '日历', icon: '📅' },
       { key: 'settings', label: '设置', icon: '⚙️' },
     ];
+
+  // 切换模式后当前 tab 可能在新 tabs 里不存在（如平时→健身时的"记录"），
+  // 归位到主页签，保持底部高亮和 tab 状态一致
+  useEffect(() => {
+    if (!tabs.some((t) => t.key === tab)) {
+      setTab(settings.fitnessPriorityMode ? 'fitness' : 'home');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.fitnessPriorityMode]);
 
   // Android 实体返回键：先让当前屏幕回退一级，其次从非首页切回首页，最后才退出应用
   useEffect(() => {
@@ -232,6 +240,9 @@ export default function App() {
   const updateActivity = useCallback((a) => setActivities((p) => p.map((x) => (x.id === a.id ? a : x))), []);
   const deleteActivity = useCallback((id) => setActivities((p) => p.filter((x) => x.id !== id)), []);
 
+  // 当前 tab 在本模式 tabs 里的下标（找不到时归 0），用于分页器定位
+  const activeIdx = Math.max(0, tabs.findIndex((t) => t.key === tab));
+
   const switchTab = useCallback((key) => {
     if (key === 'fitness' && tab === 'fitness') {
       setFitnessResetSignal((prev) => prev + 1);
@@ -266,12 +277,17 @@ export default function App() {
       <StatusBar style={settings.darkMode ? 'light' : 'dark'} />
 
       <ScrollView
+        // 切换健身优先模式时页数会变，直接 remount 分页器，让它以正确的
+        // contentOffset 初始化，避免旧偏移被夹住而落到别的页或闪一下
+        key={settings.fitnessPriorityMode ? 'fp' : 'normal'}
         ref={pagerRef}
         horizontal
         pagingEnabled
+        scrollEnabled={pagerEnabled}
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
         onMomentumScrollEnd={onPagerScroll}
+        contentOffset={{ x: activeIdx * screenWidth, y: 0 }}
         style={styles.body}
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
@@ -323,6 +339,7 @@ export default function App() {
                 onDeleteWorkouts={deleteWorkouts}
                 onUpdateWorkout={updateWorkout}
                 onUpdateActivity={updateActivity}
+                onLockPager={setPagerEnabled}
               />
             )}
             {t.key === 'settings' && (
