@@ -177,6 +177,7 @@ export async function saveBodyWeight(list) {
 const DEFAULT_SETTINGS = {
   fitnessPriorityMode: false,
   darkMode: false,
+  lightTheme: 'coral',
   fitnessPartLayout: 'list',
   fitnessExerciseLayout: 'list',
   fitnessPartOrder: [],

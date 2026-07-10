@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, Platform,
+  View, Text, StyleSheet, Pressable, Platform, ScrollView, useWindowDimensions,
   StatusBar as RNStatusBar, ActivityIndicator, Animated, BackHandler,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +18,8 @@ import FitnessScreen from './src/screens/FitnessScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 
 export default function App() {
+  const { width: screenWidth } = useWindowDimensions();
+  const pagerRef = useRef(null);
   const [tab, setTab] = useState('home');
   const [activities, setActivities] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -55,7 +57,7 @@ export default function App() {
       setExercises(e);
       setMemory(m);
       setBodyWeight(bw);
-      setThemeMode(!!s.darkMode);
+      setThemeMode(!!s.darkMode, s.lightTheme);
       setSettings(s);
       setTab(s.fitnessPriorityMode ? 'fitness' : 'home');
       setLoading(false);
@@ -74,7 +76,7 @@ export default function App() {
   const changeSettings = useCallback((nextSettings) => {
     setSettings((prev) => {
       const resolved = typeof nextSettings === 'function' ? nextSettings(prev) : nextSettings;
-      setThemeMode(!!resolved.darkMode);
+      setThemeMode(!!resolved.darkMode, resolved.lightTheme);
       return resolved;
     });
   }, []);
@@ -235,7 +237,19 @@ export default function App() {
       setFitnessResetSignal((prev) => prev + 1);
     }
     setTab(key);
-  }, [tab]);
+    const idx = tabs.findIndex((t) => t.key === key);
+    if (idx >= 0 && pagerRef.current) {
+      pagerRef.current.scrollTo({ x: idx * screenWidth, animated: true });
+    }
+  }, [tab, tabs, screenWidth]);
+
+  const onPagerScroll = useCallback((e) => {
+    const pageIndex = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
+    if (pageIndex >= 0 && pageIndex < tabs.length) {
+      const key = tabs[pageIndex].key;
+      if (key !== tab) setTab(key);
+    }
+  }, [screenWidth, tabs, tab]);
 
   if (loading) {
     return (
@@ -251,61 +265,75 @@ export default function App() {
     <SafeAreaView style={styles.root}>
       <StatusBar style={settings.darkMode ? 'light' : 'dark'} />
 
-      <View style={styles.body}>
-        {tab === 'home' && (
-          <HomeScreen
-            activities={activities}
-            logs={logs}
-            onRecord={recordActivity}
-            onReorder={reorderActivities}
-            onAdd={addActivity}
-            onUpdate={updateActivity}
-            onDelete={deleteActivity}
-            registerBack={registerBack}
-          />
-        )}
-        {tab === 'fitness' && (
-          <FitnessScreen
-            workouts={workouts}
-            exercises={exercises}
-            memory={memory}
-            bodyWeight={bodyWeight}
-            settings={settings}
-            onChangeSettings={changeSettings}
-            onAddWorkout={addWorkout}
-            onDeleteWorkout={deleteWorkout}
-            onUpdateWorkout={updateWorkout}
-            onAddExercise={addExercise}
-            onDeleteExercise={deleteExercise}
-            onReorderExercises={reorderExercises}
-            onRenameExercise={renameExercise}
-            onUpdateMemory={updateMemory}
-            onAddBodyWeight={addBodyWeight}
-            onDeleteBodyWeight={deleteBodyWeight}
-            registerBack={registerBack}
-            resetSignal={fitnessResetSignal}
-          />
-        )}
-        {tab === 'calendar' && (
-          <CalendarScreen
-            activities={activities}
-            logs={logs}
-            workouts={workouts}
-            onRemoveLog={removeLog}
-            onDeleteWorkout={deleteWorkout}
-            onDeleteLogs={deleteLogs}
-            onDeleteWorkouts={deleteWorkouts}
-            onUpdateWorkout={updateWorkout}
-            onUpdateActivity={updateActivity}
-          />
-        )}
-        {tab === 'settings' && (
-          <SettingsScreen
-            settings={settings}
-            onChangeSettings={changeSettings}
-          />
-        )}
-      </View>
+      <ScrollView
+        ref={pagerRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onMomentumScrollEnd={onPagerScroll}
+        style={styles.body}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+      >
+        {tabs.map((t) => (
+          <View key={t.key} style={{ width: screenWidth, flex: 1 }}>
+            {t.key === 'home' && (
+              <HomeScreen
+                activities={activities}
+                logs={logs}
+                onRecord={recordActivity}
+                onReorder={reorderActivities}
+                onAdd={addActivity}
+                onUpdate={updateActivity}
+                onDelete={deleteActivity}
+                registerBack={registerBack}
+              />
+            )}
+            {t.key === 'fitness' && (
+              <FitnessScreen
+                workouts={workouts}
+                exercises={exercises}
+                memory={memory}
+                bodyWeight={bodyWeight}
+                settings={settings}
+                onChangeSettings={changeSettings}
+                onAddWorkout={addWorkout}
+                onDeleteWorkout={deleteWorkout}
+                onUpdateWorkout={updateWorkout}
+                onAddExercise={addExercise}
+                onDeleteExercise={deleteExercise}
+                onReorderExercises={reorderExercises}
+                onRenameExercise={renameExercise}
+                onUpdateMemory={updateMemory}
+                onAddBodyWeight={addBodyWeight}
+                onDeleteBodyWeight={deleteBodyWeight}
+                registerBack={registerBack}
+                resetSignal={fitnessResetSignal}
+              />
+            )}
+            {t.key === 'calendar' && (
+              <CalendarScreen
+                activities={activities}
+                logs={logs}
+                workouts={workouts}
+                onRemoveLog={removeLog}
+                onDeleteWorkout={deleteWorkout}
+                onDeleteLogs={deleteLogs}
+                onDeleteWorkouts={deleteWorkouts}
+                onUpdateWorkout={updateWorkout}
+                onUpdateActivity={updateActivity}
+              />
+            )}
+            {t.key === 'settings' && (
+              <SettingsScreen
+                settings={settings}
+                onChangeSettings={changeSettings}
+              />
+            )}
+          </View>
+        ))}
+      </ScrollView>
 
       {/* 顶部提示条 */}
       <Animated.View style={[styles.toast, { transform: [{ translateY: toastY }], pointerEvents: 'none' }]}>

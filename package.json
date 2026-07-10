@@ -16,6 +16,7 @@
     "expo": "~57.0.0",
     "expo-file-system": "~57.0.0",
     "expo-haptics": "*",
+    "expo-intent-launcher": "~57.0.0",
     "expo-status-bar": "*",
     "puppeteer-core": "^25.3.0",
     "react": "*",

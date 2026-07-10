@@ -1,14 +1,19 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Linking,
+  View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Linking, Platform,
 } from 'react-native';
 import Constants from 'expo-constants';
-import { colors, getShadow, createThemedStyles } from '../theme';
+import * as FileSystem from 'expo-file-system';
+import * as IntentLauncher from 'expo-intent-launcher';
+import { colors, getShadow, createThemedStyles, LIGHT_THEMES } from '../theme';
 
 const GITHUB_OWNER = 'lgem2008';
 const GITHUB_REPO = 'DailyLife_Tracker';
 const RELEASES_PAGE = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
+const AUTHOR = 'lgem2008';
+const AUTHOR_URL = `https://github.com/${GITHUB_OWNER}`;
+const REPO_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}`;
 
 const API_MIRRORS = [
   LATEST_RELEASE_API,
@@ -49,6 +54,7 @@ function compareVersion(a, b) {
 export default function SettingsScreen({ settings, onChangeSettings }) {
   const fitnessPriorityMode = !!settings?.fitnessPriorityMode;
   const darkMode = !!settings?.darkMode;
+  const lightTheme = settings?.lightTheme || LIGHT_THEMES[0].key;
 
   const [checking, setChecking] = useState(false);
   // status: null | 'latest' | 'update' | 'error'
@@ -62,6 +68,10 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
 
   const toggleDarkMode = () => {
     onChangeSettings({ ...settings, darkMode: !darkMode });
+  };
+
+  const pickLightTheme = (key) => {
+    onChangeSettings({ ...settings, lightTheme: key });
   };
 
   const checkUpdate = useCallback(async () => {
@@ -101,10 +111,55 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
     }
   }, [checking]);
 
-  const openDownload = useCallback(() => {
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+
+  const downloadAndInstall = useCallback(async () => {
     const url = downloadUrl || RELEASES_PAGE;
+    if (Platform.OS !== 'android') {
+      Linking.openURL(url).catch(() => {});
+      return;
+    }
+    if (downloading) return;
+    setDownloading(true);
+    setDownloadProgress(0);
+    try {
+      const fileUri = FileSystem.cacheDirectory + 'update.apk';
+      const existing = await FileSystem.getInfoAsync(fileUri);
+      if (existing.exists) await FileSystem.deleteAsync(fileUri, { idempotent: true });
+
+      const download = FileSystem.createDownloadResumable(
+        url,
+        fileUri,
+        {},
+        (progress) => {
+          if (progress.totalBytesExpectedToWrite > 0) {
+            setDownloadProgress(
+              Math.round((progress.totalBytesWritten / progress.totalBytesExpectedToWrite) * 100)
+            );
+          }
+        },
+      );
+      const result = await download.downloadAsync();
+      if (!result || !result.uri) throw new Error('download failed');
+
+      const contentUri = await FileSystem.getContentUriAsync(result.uri);
+      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        data: contentUri,
+        flags: 1,
+        type: 'application/vnd.android.package-archive',
+      });
+    } catch (e) {
+      Linking.openURL(url).catch(() => {});
+    } finally {
+      setDownloading(false);
+      setDownloadProgress(0);
+    }
+  }, [downloadUrl, downloading]);
+
+  const openUrl = useCallback((url) => {
     Linking.openURL(url).catch(() => {});
-  }, [downloadUrl]);
+  }, []);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -139,6 +194,34 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
         </View>
       </Pressable>
 
+      {!darkMode && (
+        <View style={[styles.card, getShadow(), styles.cardSpaced]}>
+          <View style={styles.cardBody}>
+            <Text style={styles.cardTitle}>浅色配色</Text>
+            <Text style={styles.cardDesc}>
+              选一个喜欢的主色和背景氛围，深色模式下不生效。
+            </Text>
+          </View>
+          <View style={styles.swatchRow}>
+            {LIGHT_THEMES.map((t) => {
+              const active = t.key === lightTheme;
+              return (
+                <Pressable
+                  key={t.key}
+                  style={styles.swatchItem}
+                  onPress={() => pickLightTheme(t.key)}
+                >
+                  <View style={[styles.swatchDot, { backgroundColor: t.swatch }, active && styles.swatchDotActive]}>
+                    {active && <Text style={styles.swatchCheck}>✓</Text>}
+                  </View>
+                  <Text style={[styles.swatchLabel, active && styles.swatchLabelActive]} numberOfLines={1}>{t.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
+
       <View style={[styles.card, getShadow(), styles.cardSpaced]}>
         <View style={styles.cardHead}>
           <View style={styles.cardBody}>
@@ -165,12 +248,45 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
           <Text style={styles.statusError}>检查失败，请检查网络后重试</Text>
         )}
         {status === 'update' && (
-          <Pressable style={styles.updateBtn} onPress={openDownload}>
-            <Text style={styles.updateBtnText}>
-              发现新版本 {latestVersion} · 点这里下载
-            </Text>
+          <Pressable style={styles.updateBtn} onPress={downloadAndInstall} disabled={downloading}>
+            {downloading ? (
+              <View style={styles.updateProgress}>
+                <ActivityIndicator size="small" color="#fff" />
+                <Text style={styles.updateBtnText}>
+                  下载中 {downloadProgress}%
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.updateBtnText}>
+                发现新版本 {latestVersion} · 下载安装
+              </Text>
+            )}
           </Pressable>
         )}
+      </View>
+
+      <View style={[styles.card, getShadow(), styles.cardSpaced]}>
+        <Text style={styles.cardTitle}>关于</Text>
+        <Text style={styles.cardDesc}>
+          日常记录 · 一个可爱风的日常打卡与健身记录小工具。数据全部存在手机本地，不联网、不登录。
+        </Text>
+
+        <Pressable style={styles.aboutRow} onPress={() => openUrl(AUTHOR_URL)}>
+          <Text style={styles.aboutLabel}>作者</Text>
+          <Text style={styles.aboutValue}>{AUTHOR}</Text>
+          <Text style={styles.aboutArrow}>›</Text>
+        </Pressable>
+
+        <Pressable style={styles.aboutRow} onPress={() => openUrl(REPO_URL)}>
+          <Text style={styles.aboutLabel}>开源仓库</Text>
+          <Text style={styles.aboutValue} numberOfLines={1}>GitHub</Text>
+          <Text style={styles.aboutArrow}>›</Text>
+        </Pressable>
+
+        <View style={styles.aboutRow}>
+          <Text style={styles.aboutLabel}>版本</Text>
+          <Text style={styles.aboutValue}>v{APP_VERSION}</Text>
+        </View>
       </View>
     </ScrollView>
   );
@@ -211,6 +327,17 @@ const styles = createThemedStyles((colors) => ({
     alignSelf: 'flex-end',
     backgroundColor: colors.primary,
   },
+  swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 14 },
+  swatchItem: { alignItems: 'center', width: 56 },
+  swatchDot: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: 'transparent',
+  },
+  swatchDotActive: { borderColor: colors.text },
+  swatchCheck: { fontSize: 18, fontWeight: '900', color: colors.white },
+  swatchLabel: { fontSize: 11, fontWeight: '700', color: colors.textSoft, marginTop: 6 },
+  swatchLabelActive: { color: colors.text },
   checkBtn: {
     minWidth: 64,
     height: 36,
@@ -233,4 +360,16 @@ const styles = createThemedStyles((colors) => ({
     alignItems: 'center',
   },
   updateBtnText: { fontSize: 14, fontWeight: '800', color: colors.white },
+  updateProgress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  aboutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    gap: 10,
+  },
+  aboutLabel: { fontSize: 14, fontWeight: '800', color: colors.textSoft },
+  aboutValue: { flex: 1, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right' },
+  aboutArrow: { fontSize: 20, fontWeight: '800', color: colors.textSoft, opacity: 0.5 },
 }));

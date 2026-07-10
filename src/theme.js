@@ -1,17 +1,43 @@
 // 全局配色与样式常量（可爱圆润风）
 import { Platform, StyleSheet } from 'react-native';
 
-const lightColors = {
-  bg: '#FFF9F5',        // 暖奶油背景
+// 浅色模式共用的中性色（文字/危险色/卡片/白）
+const lightBase = {
   card: '#FFFFFF',
   text: '#4A4038',      // 柔和深棕
   textSoft: '#9B8F85',  // 次要文字
-  line: '#F0E8E0',      // 分割线
-  primary: '#FF9A8B',   // 主色 珊瑚粉
-  primarySoft: '#FFE9E4',
   danger: '#F27C7C',
   white: '#FFFFFF',
 };
+
+// 浅色模式的多套配色：切换时主色 + 背景氛围（bg/line/primarySoft）一起变
+const lightThemes = {
+  coral: {
+    key: 'coral', label: '珊瑚粉', swatch: '#FF9A8B',
+    colors: { ...lightBase, bg: '#FFF9F5', line: '#F0E8E0', primary: '#FF9A8B', primarySoft: '#FFE9E4' },
+  },
+  mint: {
+    key: 'mint', label: '薄荷绿', swatch: '#3FB489',
+    colors: { ...lightBase, bg: '#F2FBF6', line: '#DEEFE5', primary: '#3FB489', primarySoft: '#D9F2E5' },
+  },
+  sky: {
+    key: 'sky', label: '天空蓝', swatch: '#4FA6DC',
+    colors: { ...lightBase, bg: '#F2F9FD', line: '#DEEAF2', primary: '#4FA6DC', primarySoft: '#DAEDF9' },
+  },
+  lavender: {
+    key: 'lavender', label: '薰衣草', swatch: '#9179D2',
+    colors: { ...lightBase, bg: '#F8F5FD', line: '#E8E2F2', primary: '#9179D2', primarySoft: '#EBE3F7' },
+  },
+  apricot: {
+    key: 'apricot', label: '杏橙', swatch: '#EF9B4E',
+    colors: { ...lightBase, bg: '#FFFAF2', line: '#F2E8DA', primary: '#EF9B4E', primarySoft: '#FBEAD3' },
+  },
+};
+
+const DEFAULT_LIGHT_THEME = 'coral';
+
+// 供设置页色板使用（不含具体 colors，仅 key/label/swatch）
+export const LIGHT_THEMES = Object.values(lightThemes).map(({ colors: _c, ...meta }) => meta);
 
 const darkColors = {
   bg: '#171412',
@@ -51,17 +77,28 @@ const darkShadow = Platform.select({
   },
 });
 
-export const colors = { ...lightColors };
+export const colors = { ...lightThemes[DEFAULT_LIGHT_THEME].colors };
 
 let colorMode = 'light';
+let lightThemeKey = DEFAULT_LIGHT_THEME;
 
 export function getShadow() {
   return colorMode === 'dark' ? darkShadow : lightShadow;
 }
 
-export function setThemeMode(isDark) {
+function currentLightColors() {
+  return (lightThemes[lightThemeKey] || lightThemes[DEFAULT_LIGHT_THEME]).colors;
+}
+
+// 同时设定深浅模式与浅色配色；两者变化都会体现在样式缓存 key 上
+export function setThemeMode(isDark, themeKey) {
   colorMode = isDark ? 'dark' : 'light';
-  Object.assign(colors, isDark ? darkColors : lightColors);
+  if (themeKey && lightThemes[themeKey]) lightThemeKey = themeKey;
+  Object.assign(colors, isDark ? darkColors : currentLightColors());
+}
+
+export function getLightThemeKey() {
+  return lightThemeKey;
 }
 
 export function isDarkMode() {
@@ -161,15 +198,17 @@ export function getTileBadgeColor() {
 
 export function createThemedStyles(factory) {
   const cache = {};
-  const styleKeys = Object.keys(factory(lightColors));
+  const styleKeys = Object.keys(factory(colors));
   const styles = {};
   for (const key of styleKeys) {
     Object.defineProperty(styles, key, {
       enumerable: true,
       configurable: false,
       get() {
-        if (!cache[colorMode]) cache[colorMode] = StyleSheet.create(factory(colors));
-        return cache[colorMode][key];
+        // 深色只有一套；浅色按配色 key 分别缓存，切配色能重建样式
+        const cacheKey = colorMode === 'dark' ? 'dark' : `light:${lightThemeKey}`;
+        if (!cache[cacheKey]) cache[cacheKey] = StyleSheet.create(factory(colors));
+        return cache[cacheKey][key];
       },
     });
   }

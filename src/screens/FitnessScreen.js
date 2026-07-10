@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { select, success } from '../haptics';
 import { confirmAction } from '../confirm';
-import { colors, getShadow, createThemedStyles, getTileColor, getTileBadgeColor } from '../theme';
+import { colors, getShadow, createThemedStyles, getTileColor, getTileBadgeColor, isDarkMode } from '../theme';
 import { useKeyboardHeight } from '../useKeyboard';
 import { BODY_PARTS } from '../storage';
 import { dayKey, todayKey, friendlyDay, hhmm, monthGrid, monthLabel, WEEK_SHORT } from '../date';
@@ -261,7 +261,7 @@ function QuickSetRow({ index, set, onChange, onRemove, mode = DEFAULT_EXERCISE_M
 
 function RecordSheet({
   part, exercise, rec, mode, canSave,
-  onChangeRec, onSave, onClose,
+  onChangeRec, onSave, onClose, onEditExercise,
   workouts, onDeleteWorkout, onEditWorkout,
   dateKey, onChangeDate,
 }) {
@@ -277,12 +277,20 @@ function RecordSheet({
         <View style={[styles.sheetCard, kbHeight > 0 && styles.sheetCardLifted, kbHeight > 0 && { paddingBottom: kbHeight + 12 }, getShadow()]}>
           <View style={styles.sheetHandle} />
           <View style={styles.sheetHead}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.sheetTitle}>{exercise}</Text>
+            <Pressable
+              style={{ flex: 1 }}
+              onPress={onEditExercise}
+              disabled={!onEditExercise}
+              hitSlop={6}
+            >
+              <View style={styles.sheetTitleRow}>
+                <Text style={styles.sheetTitle}>{exercise}</Text>
+                {onEditExercise && <Text style={styles.sheetTitleEdit}>编辑</Text>}
+              </View>
               <Text style={styles.sheetSub}>
                 {part.label} · {modeSummary(mode)}
               </Text>
-            </View>
+            </Pressable>
             <Pressable style={styles.sheetClose} onPress={onClose} hitSlop={8}>
               <Text style={styles.sheetCloseText}>✕</Text>
             </Pressable>
@@ -1099,6 +1107,7 @@ function ExerciseHistory({ workouts, part, exercise, noWeight, mode, onDelete, o
 function DraggableRow({
   name, index, editMode, isActive, dragIdx, listLen,
   onGripStart, onGripSwap, onGripEnd, onPress, onDelete, count, progress,
+  onEnterEditMode,
 }) {
   const translateY = useRef(new Animated.Value(0)).current;
   const startY = useRef(0);
@@ -1138,6 +1147,13 @@ function DraggableRow({
   };
 
   const beginDrag = () => {
+    // 非编辑模式：长按进入编辑模式（不拖动）；编辑模式：长按开始拖动排序
+    if (!editMode) {
+      moved.current = true; // 阻止松手后触发点击
+      select();
+      onEnterEditMode();
+      return;
+    }
     if (listLen <= 1) return;
     dragging.current = true;
     select();
@@ -1178,20 +1194,34 @@ function DraggableRow({
     }
   };
 
+  const springHome = () => {
+    Animated.spring(translateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 90,
+    }).start();
+  };
+
   const handleResponderEnd = () => {
     clearHold();
     if (dragging.current) {
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        friction: 8,
-        tension: 90,
-      }).start();
+      springHome();
       dragging.current = false;
       onGripEnd();
       return;
     }
     if (!moved.current) onPress();
+  };
+
+  // 被 ScrollView 抢走手势时：只做清理，不触发点击，避免误触
+  const handleResponderTerminate = () => {
+    clearHold();
+    if (dragging.current) {
+      springHome();
+      dragging.current = false;
+      onGripEnd();
+    }
   };
 
   return (
@@ -1206,11 +1236,11 @@ function DraggableRow({
       <View
         style={styles.exTap}
         onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => dragging.current}
         onResponderGrant={handleResponderGrant}
         onResponderMove={handleResponderMove}
         onResponderRelease={handleResponderEnd}
-        onResponderTerminate={handleResponderEnd}
+        onResponderTerminate={handleResponderTerminate}
       >
         <View style={styles.exMain}>
           <Text style={styles.exName} numberOfLines={1}>{name}</Text>
@@ -1529,20 +1559,34 @@ function DraggablePartRow({ part, index, listLen, isActive, dragIdx, onPress, on
     }
   };
 
+  const springHome = () => {
+    Animated.spring(translateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 90,
+    }).start();
+  };
+
   const handleEnd = () => {
     clearHold();
     if (dragging.current) {
-      Animated.spring(translateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        friction: 8,
-        tension: 90,
-      }).start();
+      springHome();
       dragging.current = false;
       onDragEnd();
       return;
     }
     if (!moved.current) onPress();
+  };
+
+  // 被 ScrollView 抢走手势时：只做清理，不触发点击，避免误触
+  const handleTerminate = () => {
+    clearHold();
+    if (dragging.current) {
+      springHome();
+      dragging.current = false;
+      onDragEnd();
+    }
   };
 
   return (
@@ -1555,11 +1599,11 @@ function DraggablePartRow({ part, index, listLen, isActive, dragIdx, onPress, on
         { transform: [{ translateY }], zIndex: isActive ? 10 : 1 },
       ]}
       onStartShouldSetResponder={() => true}
-      onMoveShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => dragging.current}
       onResponderGrant={handleGrant}
       onResponderMove={handleMove}
       onResponderRelease={handleEnd}
-      onResponderTerminate={handleEnd}
+      onResponderTerminate={handleTerminate}
     >
       <Text style={styles.partEmoji}>{part.emoji}</Text>
       <Text style={styles.partLabel}>{part.label}</Text>
@@ -1718,16 +1762,16 @@ export default function FitnessScreen({
   const exerciseLayout = settings?.fitnessExerciseLayout === 'grid' ? 'grid' : 'list';
   const showExerciseGrid = exerciseLayout === 'grid' && !editMode;
   const exerciseContentWidth = Math.max(0, Math.min(460, viewportWidth) - 28);
-  const exerciseGridCols = exerciseContentWidth >= 360 ? 3 : 2;
+  const exerciseGridCols = 3;
   const exerciseTileWidth = Math.max(
-    120,
+    72,
     Math.floor((exerciseContentWidth - GAP * (exerciseGridCols - 1)) / exerciseGridCols),
   );
   const partLayout = settings?.fitnessPartLayout === 'grid' ? 'grid' : 'list';
   const showPartGrid = partLayout === 'grid';
-  const partGridCols = exerciseContentWidth >= 360 ? 3 : 2;
+  const partGridCols = 3;
   const partTileWidth = Math.max(
-    120,
+    72,
     Math.floor((exerciseContentWidth - GAP * (partGridCols - 1)) / partGridCols),
   );
 
@@ -2051,7 +2095,7 @@ export default function FitnessScreen({
             <Text style={styles.title}>{part.label}</Text>
           </View>
           <Text style={styles.sub}>
-            {editMode ? '点动作改名称/记录方式 · 长按拖动排序 · 点 ✕ 删除' : '点击动作，底部快速记录'}
+            {editMode ? '点动作改名称/记录方式 · 长按拖动排序 · 点 ✕ 删除' : '点击动作记录 · 长按进入编辑'}
           </Text>
 
           {exList.length === 0 && (
@@ -2103,6 +2147,7 @@ export default function FitnessScreen({
                   onGripEnd={onGripEnd}
                   onPress={() => { editMode ? openEditExercise(name) : openExercise(name); }}
                   onDelete={() => confirmDeleteExercise(name)}
+                  onEnterEditMode={() => { setEditMode(true); setDragIdx(null); }}
                   count={cnt}
                   progress={progress}
                 />
@@ -2150,6 +2195,7 @@ export default function FitnessScreen({
             onChangeRec={changeRec}
             onSave={saveWorkout}
             onClose={() => setExercise(null)}
+            onEditExercise={() => { setExercise(null); openEditExercise(exercise); }}
             dateKey={recordDate}
             onChangeDate={setRecordDate}
             workouts={workouts}
@@ -2227,7 +2273,7 @@ const styles = createThemedStyles((colors) => ({
   partEmoji: { fontSize: 28, marginRight: 14 },
   partLabel: { fontSize: 18, fontWeight: '800', color: colors.text, flex: 1 },
   partBadge: {
-    backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 12,
+    backgroundColor: getTileBadgeColor(), borderRadius: 12,
     paddingHorizontal: 10, paddingVertical: 4, marginRight: 8,
   },
   partBadgeText: { fontSize: 12, fontWeight: '800', color: colors.text },
@@ -2387,7 +2433,7 @@ const styles = createThemedStyles((colors) => ({
   },
   sheetBackdrop: {
     position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
-    backgroundColor: 'rgba(74,64,56,0.16)',
+    backgroundColor: isDarkMode() ? 'rgba(0,0,0,0.45)' : 'rgba(74,64,56,0.16)',
   },
   sheetKeyboard: { flex: 1, width: '100%', justifyContent: 'flex-end' },
   sheetCard: {
@@ -2401,7 +2447,13 @@ const styles = createThemedStyles((colors) => ({
     alignSelf: 'center', marginBottom: 10,
   },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  sheetTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sheetTitle: { fontSize: 20, fontWeight: '800', color: colors.text },
+  sheetTitleEdit: {
+    fontSize: 12, fontWeight: '800', color: colors.primary,
+    backgroundColor: colors.primarySoft, borderRadius: 10,
+    paddingHorizontal: 8, paddingVertical: 2,
+  },
   sheetSub: { fontSize: 12, color: colors.textSoft, fontWeight: '700', marginTop: 2 },
   sheetClose: {
     width: 34, height: 34, borderRadius: 17, backgroundColor: colors.bg,

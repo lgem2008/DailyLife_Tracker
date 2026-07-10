@@ -15,6 +15,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set version from tag
+        run: |
+          RAW="${GITHUB_REF_NAME}"
+          VERSION="${RAW#v}"
+          echo "Tag=$RAW  Version=$VERSION"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}; PATCH=${PATCH:-0}
+          VERSION_CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+          echo "versionCode=$VERSION_CODE"
+          # 写入 app.json 的 expo.version（检查更新比较用）
+          node -e "const fs=require('fs');const p='app.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.expo.version='$VERSION';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');"
+          # 写入 build.gradle 的 versionName / versionCode（安装器显示 + 覆盖安装判定）
+          sed -i "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" android/app/build.gradle
+          sed -i "s/versionCode [0-9]*/versionCode $VERSION_CODE/" android/app/build.gradle
+          echo "---- app.json ----"; grep '"version"' app.json
+          echo "---- build.gradle ----"; grep -E "versionName|versionCode" android/app/build.gradle
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
