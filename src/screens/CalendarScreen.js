@@ -202,11 +202,13 @@ export default function CalendarScreen({
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
-  // PanResponder 只创建一次，用 ref 读取当前年月，避免闭包捕获旧值
+  // PanResponder 只创建一次，用 ref 读取最新状态，避免闭包捕获旧值
   const yearRef = useRef(year);
   const monthRef = useRef(month);
+  const onLockPagerRef = useRef(onLockPager);
   yearRef.current = year;
   monthRef.current = month;
+  onLockPagerRef.current = onLockPager;
   const [selected, setSelected] = useState(today);
   const [expanded, setExpanded] = useState(false);
   const [selectedBatchKeys, setSelectedBatchKeys] = useState([]);
@@ -214,6 +216,8 @@ export default function CalendarScreen({
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [editingActivity, setEditingActivity] = useState(null);
   const expandAnim = useRef(new Animated.Value(0)).current;
+  // 整个手指按在日历区期间锁住外层分页（不按 pan 生命周期分段，避免 touch/pan 交错提前解锁）
+  const pagerLockedRef = useRef(false);
 
   useEffect(() => {
     Animated.timing(expandAnim, {
@@ -231,32 +235,70 @@ export default function CalendarScreen({
     } else if (m === 0) { setYear(y - 1); setMonth(11); } else setMonth(m - 1);
   };
 
-  const lockPager = () => { if (onLockPager) onLockPager(false); };
-  const releasePager = () => { if (onLockPager) onLockPager(true); };
+  const lockPager = () => {
+    if (pagerLockedRef.current) return;
+    pagerLockedRef.current = true;
+    if (onLockPagerRef.current) onLockPagerRef.current(false);
+  };
+
+  const unlockPager = () => {
+    if (!pagerLockedRef.current) return;
+    pagerLockedRef.current = false;
+    if (onLockPagerRef.current) onLockPagerRef.current(true);
+  };
+
+  // 组件卸载时恢复分页（例如切换健身优先模式导致 remount）
+  useEffect(() => () => {
+    if (pagerLockedRef.current && onLockPagerRef.current) onLockPagerRef.current(true);
+    pagerLockedRef.current = false;
+  }, []);
+
+  // 手指一落到日历区就锁住底部横向分页；抬手再放行
+  const onCalendarTouchStart = () => {
+    lockPager();
+  };
+
+  const onCalendarTouchEnd = () => {
+    unlockPager();
+  };
 
   const calendarPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      // 在网格上移动超过阈值就抢下手势，避免被外层横向翻页吞掉
-      onMoveShouldSetPanResponder: (_, gs) => (Math.abs(gs.dx) > 12 || Math.abs(gs.dy) > 12),
-      onMoveShouldSetPanResponderCapture: (_, gs) => (Math.abs(gs.dx) > 12 || Math.abs(gs.dy) > 12),
-      // 真正抢到手势后才锁外层翻页，保证一定有对应的释放
-      onPanResponderGrant: lockPager,
+      onStartShouldSetPanResponderCapture: () => false,
+      // 方向明确后立即抢权（含 capture）：横向切月，纵向展开/收起
+      onMoveShouldSetPanResponder: (_, gs) => {
+        const absX = Math.abs(gs.dx);
+        const absY = Math.abs(gs.dy);
+        return (absX > 8 && absX > absY * 1.05) || (absY > 8 && absY > absX * 1.05);
+      },
+      onMoveShouldSetPanResponderCapture: (_, gs) => {
+        const absX = Math.abs(gs.dx);
+        const absY = Math.abs(gs.dy);
+        return (absX > 8 && absX > absY * 1.05) || (absY > 8 && absY > absX * 1.05);
+      },
+      onPanResponderGrant: () => {
+        // touchStart 通常已锁；这里兜底，防止个别平台未走到 touchStart
+        lockPager();
+      },
       onPanResponderRelease: (_, gs) => {
-        releasePager();
         const absX = Math.abs(gs.dx);
         const absY = Math.abs(gs.dy);
 
-        if (absX >= 42 && absX > absY * 1.2) {
+        if (absX >= 36 && absX > absY * 1.15) {
           stepMonth(gs.dx < 0 ? 1 : -1);
-          return;
+        } else if (absY >= 22 && absY > absX * 1.15) {
+          // 下滑展开，上滑收起
+          setExpanded(gs.dy > 0);
         }
-
-        if (absY < 24 || absY <= absX * 1.2) return;
-        setExpanded(gs.dy > 0);
+        // pan 结束后立刻放行；若随后还有 touchEnd，unlock 是幂等的
+        unlockPager();
       },
-      onPanResponderTerminate: releasePager,
+      onPanResponderTerminate: () => {
+        unlockPager();
+      },
       onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
     })
   ).current;
 
@@ -408,205 +450,220 @@ export default function CalendarScreen({
 
   return (
     <>
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.monthBar}>
-        <Pressable style={styles.navBtn} onPress={prevMonth} hitSlop={10}>
-          <Text style={styles.navText}>‹</Text>
-        </Pressable>
-        <Text style={styles.monthText}>{monthLabel(year, month)}</Text>
-        <Pressable style={styles.navBtn} onPress={nextMonth} hitSlop={10}>
-          <Text style={styles.navText}>›</Text>
-        </Pressable>
-      </View>
+    <View style={styles.screen}>
+      <View style={styles.calendarHeader}>
+        <View style={styles.monthBar}>
+          <Pressable style={styles.navBtn} onPress={prevMonth} hitSlop={10}>
+            <Text style={styles.navText}>‹</Text>
+          </Pressable>
+          <Text style={styles.monthText}>{monthLabel(year, month)}</Text>
+          <Pressable style={styles.navBtn} onPress={nextMonth} hitSlop={10}>
+            <Text style={styles.navText}>›</Text>
+          </Pressable>
+        </View>
 
-      <View style={styles.weekRow}>
-        {WEEK_SHORT.map((w, i) => (
-          <Text key={w} style={[styles.weekCell, (i === 0 || i === 6) && styles.weekEnd]}>{w}</Text>
-        ))}
-      </View>
+        <View style={styles.weekRow}>
+          {WEEK_SHORT.map((w, i) => (
+            <Text key={w} style={[styles.weekCell, (i === 0 || i === 6) && styles.weekEnd]}>{w}</Text>
+          ))}
+        </View>
 
-      <View {...calendarPanResponder.panHandlers}>
-        <View style={[styles.grid, getShadow()]}>
-          {cells.map((cell, i) => {
-            const isToday = cell.key === today;
-            const isSel = cell.key === selected;
-            const emojis = cell.key ? (dayEmojis[cell.key] || []) : [];
-            return (
-              <Pressable
-                key={i}
-                style={styles.dayCell}
-                disabled={!cell.inMonth}
-                onPress={() => cell.key && setSelected(cell.key)}
-              >
-                <Animated.View style={[styles.dayInner, { height: cellHeight }, isSel && styles.daySel, isToday && !isSel && styles.dayToday]}>
-                  {!cell.inMonth ? null : (
-                    <>
-                      <Animated.View style={[styles.compactLayer, { opacity: compactOpacity }]}>
-                        {emojis.length > 0 ? (
-                          <View style={styles.compactDots}>
-                            {emojis.slice(0, 2).map((e, k) => (
-                              <Text key={k} style={styles.compactDot}>{e.v}</Text>
-                            ))}
-                            {emojis.length > 2 && (
-                              <Text style={[styles.compactMore, isSel && { color: colors.white }]}>·</Text>
-                            )}
-                          </View>
-                        ) : (
-                          <Text style={[styles.compactDayNum, isSel && styles.dayNumSel, isToday && !isSel && styles.dayNumToday]}>
+        {/* 日历手势区固定在顶部：按下即锁横向分页；明确方向后切月/展开收起 */}
+        <View
+          style={styles.calendarGestureZone}
+          onTouchStart={onCalendarTouchStart}
+          onTouchEnd={onCalendarTouchEnd}
+          onTouchCancel={onCalendarTouchEnd}
+          {...calendarPanResponder.panHandlers}
+        >
+          <View style={[styles.grid, getShadow()]}>
+            {cells.map((cell, i) => {
+              const isToday = cell.key === today;
+              const isSel = cell.key === selected;
+              const emojis = cell.key ? (dayEmojis[cell.key] || []) : [];
+              return (
+                <Pressable
+                  key={i}
+                  style={styles.dayCell}
+                  disabled={!cell.inMonth}
+                  onPress={() => cell.key && setSelected(cell.key)}
+                  delayPressIn={80}
+                >
+                  <Animated.View style={[styles.dayInner, { height: cellHeight }, isSel && styles.daySel, isToday && !isSel && styles.dayToday]}>
+                    {!cell.inMonth ? null : (
+                      <>
+                        <Animated.View style={[styles.compactLayer, { opacity: compactOpacity }]}>
+                          {emojis.length > 0 ? (
+                            <View style={styles.compactDots}>
+                              {emojis.slice(0, 2).map((e, k) => (
+                                <Text key={k} style={styles.compactDot}>{e.v}</Text>
+                              ))}
+                              {emojis.length > 2 && (
+                                <Text style={[styles.compactMore, isSel && { color: colors.white }]}>·</Text>
+                              )}
+                            </View>
+                          ) : (
+                            <Text style={[styles.compactDayNum, isSel && styles.dayNumSel, isToday && !isSel && styles.dayNumToday]}>
+                              {cell.day}
+                            </Text>
+                          )}
+                        </Animated.View>
+                        <Animated.View style={[styles.expandedLayer, { opacity: expandedOpacity }]}>
+                          <Text style={[styles.dayNum, isSel && styles.dayNumSel, isToday && !isSel && styles.dayNumToday]}>
                             {cell.day}
                           </Text>
-                        )}
-                      </Animated.View>
-                      <Animated.View style={[styles.expandedLayer, { opacity: expandedOpacity }]}>
-                        <Text style={[styles.dayNum, isSel && styles.dayNumSel, isToday && !isSel && styles.dayNumToday]}>
-                          {cell.day}
-                        </Text>
-                        {emojis.length > 0 && (
-                          <View style={styles.dots}>
-                            {emojis.slice(0, 3).map((e, k) => (
-                              <Text key={k} style={styles.dot}>{e.v}</Text>
-                            ))}
-                            {emojis.length > 3 && <Text style={[styles.dotMore, isSel && { color: colors.white }]}>+{emojis.length - 3}</Text>}
-                          </View>
-                        )}
-                      </Animated.View>
-                    </>
-                  )}
-                </Animated.View>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-
-      <Pressable
-        style={styles.swipeHandle}
-        onPress={() => setExpanded((prev) => !prev)}
-      >
-        <View style={styles.swipeHandleTouch}>
-          <View style={styles.swipeHandleBar} />
-          <Text style={styles.swipeHint}>{expanded ? '上滑日历收起，信息更紧凑' : '下滑日历展开，显示更多日期信息'}</Text>
-        </View>
-      </Pressable>
-
-      <View style={styles.detailHead}>
-        <Text style={styles.detailTitle}>{friendlyDay(selected)}</Text>
-        {detailActionMode && (
-          <View style={styles.batchActions}>
-            {selectedBatchKeys.length > 0 && (
-              <Pressable onPress={() => setSelectedBatchKeys([])}>
-                <Text style={styles.batchGhost}>清空</Text>
-              </Pressable>
-            )}
-            {selectedBatchKeys.length > 0 && (
-              <Pressable onPress={deleteSelectedBatch}>
-                <Text style={styles.batchDanger}>删除选中 ({selectedBatchKeys.length})</Text>
-              </Pressable>
-            )}
-            <Pressable onPress={closeDetailActions}>
-              <Text style={styles.batchPrimary}>完成</Text>
-            </Pressable>
-          </View>
-        )}
-      </View>
-
-      {!hasDetail ? (
-        <Text style={styles.detailEmpty}>这天还没有记录</Text>
-      ) : (
-        <View style={styles.detailCard}>
-          <View style={styles.detailRows}>
-            {detail.actItems.map((item) => {
-              const activity = actMap[item.aid];
-              const picked = selectedBatchKeys.includes(item.key);
-              const color = activity ? getTileColor(activity.color) : colors.line;
-              return (
-                <Pressable
-                  key={item.key}
-                  style={[styles.detailRow, detailActionMode && picked && styles.detailRowPicked]}
-                  onLongPress={openDetailActions}
-                  delayLongPress={350}
-                >
-                  {detailActionMode && (
-                    <Pressable
-                      style={[styles.checkbox, picked && styles.checkboxOn]}
-                      onPress={() => toggleBatchSelect(item.key)}
-                      hitSlop={8}
-                    >
-                      {picked && <Text style={styles.checkboxTick}>✓</Text>}
-                    </Pressable>
-                  )}
-                  <View style={[styles.detailDot, { backgroundColor: color }]} />
-                  <View style={styles.detailMain}>
-                    <Text style={styles.detailName}>{activity ? activity.label : '已删除'}</Text>
-                    <Text style={styles.detailMeta}>
-                      {item.count > 1 ? `${item.count} 次` : '1 次'} · {hhmm(item.last)}
-                    </Text>
-                  </View>
-                  {detailActionMode && activity && onUpdateActivity && (
-                    <Pressable style={styles.rowIconBtn} onPress={() => setEditingActivity(activity)} hitSlop={6}>
-                      <Text style={styles.rowIconEdit}>✎</Text>
-                    </Pressable>
-                  )}
-                  {detailActionMode && (
-                    <Pressable style={styles.rowIconBtn} onPress={() => deleteActivityRow(item)} hitSlop={6}>
-                      <Text style={styles.rowIconDel}>🗑</Text>
-                    </Pressable>
-                  )}
+                          {emojis.length > 0 && (
+                            <View style={styles.dots}>
+                              {emojis.slice(0, 3).map((e, k) => (
+                                <Text key={k} style={styles.dot}>{e.v}</Text>
+                              ))}
+                              {emojis.length > 3 && <Text style={[styles.dotMore, isSel && { color: colors.white }]}>+{emojis.length - 3}</Text>}
+                            </View>
+                          )}
+                        </Animated.View>
+                      </>
+                    )}
+                  </Animated.View>
                 </Pressable>
               );
             })}
-            {detail.wks.map((item) => {
-              const part = partMap[item.part];
-              const picked = selectedBatchKeys.includes(item.key);
-              const color = part ? getTileColor(part.color) : colors.line;
-              const meta = `${item.setCount} 组${item.top > 0 ? ` · ${item.top}kg` : ''}`;
-              return (
-                <Pressable
-                  key={item.key}
-                  style={[styles.detailRow, detailActionMode && picked && styles.detailRowPicked]}
-                  onLongPress={openDetailActions}
-                  delayLongPress={350}
-                >
-                  {detailActionMode && (
-                    <Pressable
-                      style={[styles.checkbox, picked && styles.checkboxOn]}
-                      onPress={() => toggleBatchSelect(item.key)}
-                      hitSlop={8}
-                    >
-                      {picked && <Text style={styles.checkboxTick}>✓</Text>}
-                    </Pressable>
-                  )}
-                  <View style={[styles.detailDot, { backgroundColor: color }]} />
-                  <View style={styles.detailMain}>
-                    <Text style={styles.detailName}>{item.exercise}</Text>
-                    <Text style={styles.detailMeta}>
-                      {part ? `${part.label} · ${meta}` : meta} · {hhmm(item.ts)}
-                    </Text>
-                  </View>
-                  {detailActionMode && (
-                    <>
-                      <Pressable style={styles.rowIconBtn} onPress={() => setEditingWorkout(item)} hitSlop={6}>
+          </View>
+
+          <Pressable
+            style={styles.swipeHandle}
+            onPress={() => setExpanded((prev) => !prev)}
+          >
+            <View style={styles.swipeHandleTouch}>
+              <View style={styles.swipeHandleBar} />
+              <Text style={styles.swipeHint}>{expanded ? '上滑日历收起，信息更紧凑' : '下滑日历展开，显示更多日期信息'}</Text>
+            </View>
+          </Pressable>
+        </View>
+      </View>
+
+      {/* 仅详情区滚动，避免和日历上下滑手势抢占 */}
+      <ScrollView
+        style={styles.detailScroll}
+        contentContainerStyle={styles.detailContent}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.detailHead}>
+          <Text style={styles.detailTitle}>{friendlyDay(selected)}</Text>
+          {detailActionMode && (
+            <View style={styles.batchActions}>
+              {selectedBatchKeys.length > 0 && (
+                <Pressable onPress={() => setSelectedBatchKeys([])}>
+                  <Text style={styles.batchGhost}>清空</Text>
+                </Pressable>
+              )}
+              {selectedBatchKeys.length > 0 && (
+                <Pressable onPress={deleteSelectedBatch}>
+                  <Text style={styles.batchDanger}>删除选中 ({selectedBatchKeys.length})</Text>
+                </Pressable>
+              )}
+              <Pressable onPress={closeDetailActions}>
+                <Text style={styles.batchPrimary}>完成</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+
+        {!hasDetail ? (
+          <Text style={styles.detailEmpty}>这天还没有记录</Text>
+        ) : (
+          <View style={styles.detailCard}>
+            <View style={styles.detailRows}>
+              {detail.actItems.map((item) => {
+                const activity = actMap[item.aid];
+                const picked = selectedBatchKeys.includes(item.key);
+                const color = activity ? getTileColor(activity.color) : colors.line;
+                return (
+                  <Pressable
+                    key={item.key}
+                    style={[styles.detailRow, detailActionMode && picked && styles.detailRowPicked]}
+                    onLongPress={openDetailActions}
+                    delayLongPress={350}
+                  >
+                    {detailActionMode && (
+                      <Pressable
+                        style={[styles.checkbox, picked && styles.checkboxOn]}
+                        onPress={() => toggleBatchSelect(item.key)}
+                        hitSlop={8}
+                      >
+                        {picked && <Text style={styles.checkboxTick}>✓</Text>}
+                      </Pressable>
+                    )}
+                    <View style={[styles.detailDot, { backgroundColor: color }]} />
+                    <View style={styles.detailMain}>
+                      <Text style={styles.detailName}>{activity ? activity.label : '已删除'}</Text>
+                      <Text style={styles.detailMeta}>
+                        {item.count > 1 ? `${item.count} 次` : '1 次'} · {hhmm(item.last)}
+                      </Text>
+                    </View>
+                    {detailActionMode && activity && onUpdateActivity && (
+                      <Pressable style={styles.rowIconBtn} onPress={() => setEditingActivity(activity)} hitSlop={6}>
                         <Text style={styles.rowIconEdit}>✎</Text>
                       </Pressable>
-                      <Pressable style={styles.rowIconBtn} onPress={() => deleteWorkoutRow(item)} hitSlop={6}>
+                    )}
+                    {detailActionMode && (
+                      <Pressable style={styles.rowIconBtn} onPress={() => deleteActivityRow(item)} hitSlop={6}>
                         <Text style={styles.rowIconDel}>🗑</Text>
                       </Pressable>
-                    </>
-                  )}
-                </Pressable>
-              );
-            })}
+                    )}
+                  </Pressable>
+                );
+              })}
+              {detail.wks.map((item) => {
+                const part = partMap[item.part];
+                const picked = selectedBatchKeys.includes(item.key);
+                const color = part ? getTileColor(part.color) : colors.line;
+                const meta = `${item.setCount} 组${item.top > 0 ? ` · ${item.top}kg` : ''}`;
+                return (
+                  <Pressable
+                    key={item.key}
+                    style={[styles.detailRow, detailActionMode && picked && styles.detailRowPicked]}
+                    onLongPress={openDetailActions}
+                    delayLongPress={350}
+                  >
+                    {detailActionMode && (
+                      <Pressable
+                        style={[styles.checkbox, picked && styles.checkboxOn]}
+                        onPress={() => toggleBatchSelect(item.key)}
+                        hitSlop={8}
+                      >
+                        {picked && <Text style={styles.checkboxTick}>✓</Text>}
+                      </Pressable>
+                    )}
+                    <View style={[styles.detailDot, { backgroundColor: color }]} />
+                    <View style={styles.detailMain}>
+                      <Text style={styles.detailName}>{item.exercise}</Text>
+                      <Text style={styles.detailMeta}>
+                        {part ? `${part.label} · ${meta}` : meta} · {hhmm(item.ts)}
+                      </Text>
+                    </View>
+                    {detailActionMode && (
+                      <>
+                        <Pressable style={styles.rowIconBtn} onPress={() => setEditingWorkout(item)} hitSlop={6}>
+                          <Text style={styles.rowIconEdit}>✎</Text>
+                        </Pressable>
+                        <Pressable style={styles.rowIconBtn} onPress={() => deleteWorkoutRow(item)} hitSlop={6}>
+                          <Text style={styles.rowIconDel}>🗑</Text>
+                        </Pressable>
+                      </>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.hint}>
+              {detailActionMode ? '左边勾选可批量删除，右边小图标可单独编辑或删除' : '长按记录显示编辑和删除'}
+            </Text>
           </View>
-          <Text style={styles.hint}>
-            {detailActionMode ? '左边勾选可批量删除，右边小图标可单独编辑或删除' : '长按记录显示编辑和删除'}
-          </Text>
-        </View>
-      )}
-    </ScrollView>
+        )}
+      </ScrollView>
+    </View>
 
     <WorkoutEditModal
       visible={!!editingWorkout}
@@ -633,7 +690,21 @@ export default function CalendarScreen({
 
 const styles = createThemedStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: 14, paddingBottom: 40, width: '100%', maxWidth: 460, alignSelf: 'center' },
+  calendarHeader: {
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    width: '100%',
+    maxWidth: 460,
+    alignSelf: 'center',
+  },
+  detailScroll: { flex: 1 },
+  detailContent: {
+    paddingHorizontal: 14,
+    paddingBottom: 40,
+    width: '100%',
+    maxWidth: 460,
+    alignSelf: 'center',
+  },
 
   monthBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 4, marginBottom: 14 },
   navBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
@@ -644,6 +715,9 @@ const styles = createThemedStyles((colors) => ({
   weekCell: { flex: 1, textAlign: 'center', fontSize: 13, fontWeight: '700', color: colors.textSoft },
   weekEnd: { color: colors.primary },
 
+  calendarGestureZone: {
+    // 包住网格 + 收起把手，保证上下滑手势命中区域足够
+  },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

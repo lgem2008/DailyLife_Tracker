@@ -247,6 +247,8 @@ export default function App() {
     if (key === 'fitness' && tab === 'fitness') {
       setFitnessResetSignal((prev) => prev + 1);
     }
+    // 离开日历时清掉可能残留的分页锁，避免横向翻页被卡死
+    if (key !== 'calendar') setPagerEnabled(true);
     setTab(key);
     const idx = tabs.findIndex((t) => t.key === key);
     if (idx >= 0 && pagerRef.current) {
@@ -258,7 +260,10 @@ export default function App() {
     const pageIndex = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
     if (pageIndex >= 0 && pageIndex < tabs.length) {
       const key = tabs[pageIndex].key;
-      if (key !== tab) setTab(key);
+      if (key !== tab) {
+        if (key !== 'calendar') setPagerEnabled(true);
+        setTab(key);
+      }
     }
   }, [screenWidth, tabs, tab]);
 

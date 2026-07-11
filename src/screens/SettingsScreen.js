@@ -3,12 +3,13 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Linking, Platform,
 } from 'react-native';
 import Constants from 'expo-constants';
-import * as FileSystem from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { colors, getShadow, createThemedStyles, LIGHT_THEMES } from '../theme';
 
 const GITHUB_OWNER = 'lgem2008';
 const GITHUB_REPO = 'DailyLife_Tracker';
+const APP_PACKAGE = 'com.dailylife.tracker';
 const RELEASES_PAGE = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 const AUTHOR = 'lgem2008';
@@ -21,7 +22,15 @@ const API_MIRRORS = [
   `https://gh-proxy.com/https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
 ];
 
-const DOWNLOAD_PROXY = 'https://ghproxy.net/';
+// 直链失败时依次尝试镜像（国内访问 GitHub Releases 更稳）
+const DOWNLOAD_PROXIES = [
+  '',
+  'https://ghproxy.net/',
+  'https://gh-proxy.com/',
+];
+
+// FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK
+const INSTALL_INTENT_FLAGS = 1 | 0x10000000;
 
 function fetchWithTimeout(url, opts = {}, ms = 8000) {
   const controller = new AbortController();
@@ -51,16 +60,29 @@ function compareVersion(a, b) {
   return 0;
 }
 
+function buildDownloadCandidates(rawUrl) {
+  if (!rawUrl) return [];
+  const urls = [];
+  for (const proxy of DOWNLOAD_PROXIES) {
+    const next = proxy && rawUrl.includes('github.com') ? proxy + rawUrl : rawUrl;
+    if (!urls.includes(next)) urls.push(next);
+  }
+  return urls;
+}
+
 export default function SettingsScreen({ settings, onChangeSettings }) {
   const fitnessPriorityMode = !!settings?.fitnessPriorityMode;
   const darkMode = !!settings?.darkMode;
   const lightTheme = settings?.lightTheme || LIGHT_THEMES[0].key;
 
   const [checking, setChecking] = useState(false);
-  // status: null | 'latest' | 'update' | 'error'
+  // status: null | 'latest' | 'update' | 'error' | 'no_apk'
   const [status, setStatus] = useState(null);
   const [latestVersion, setLatestVersion] = useState('');
   const [downloadUrl, setDownloadUrl] = useState('');
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [installError, setInstallError] = useState('');
 
   const toggleFitnessPriority = () => {
     onChangeSettings({ ...settings, fitnessPriorityMode: !fitnessPriorityMode });
@@ -78,6 +100,7 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
     if (checking) return;
     setChecking(true);
     setStatus(null);
+    setInstallError('');
     try {
       let data = null;
       for (const api of API_MIRRORS) {
@@ -97,13 +120,17 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
       const apkAsset = (data?.assets || []).find(
         (a) => typeof a?.name === 'string' && a.name.toLowerCase().endsWith('.apk'),
       );
-      let url = apkAsset?.browser_download_url || data?.html_url || RELEASES_PAGE;
-      if (url.includes('github.com') && DOWNLOAD_PROXY) {
-        url = DOWNLOAD_PROXY + url;
-      }
+      // 只接受真正的 APK 直链，避免把 Releases 网页当安装包下载
+      const apkUrl = apkAsset?.browser_download_url || '';
       setLatestVersion(tag);
-      setDownloadUrl(url);
-      setStatus(compareVersion(tag, APP_VERSION) > 0 ? 'update' : 'latest');
+      setDownloadUrl(apkUrl);
+      if (compareVersion(tag, APP_VERSION) <= 0) {
+        setStatus('latest');
+      } else if (!apkUrl) {
+        setStatus('no_apk');
+      } else {
+        setStatus('update');
+      }
     } catch (e) {
       setStatus('error');
     } finally {
@@ -111,51 +138,102 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
     }
   }, [checking]);
 
-  const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
+  const openInstallPermissionSettings = useCallback(async () => {
+    try {
+      await IntentLauncher.startActivityAsync(
+        IntentLauncher.ActivityAction.MANAGE_UNKNOWN_APP_SOURCES,
+        { data: `package:${APP_PACKAGE}` },
+      );
+    } catch (_) {
+      try {
+        await IntentLauncher.startActivityAsync(
+          IntentLauncher.ActivityAction.MANAGE_UNKNOWN_APP_SOURCES,
+        );
+      } catch (__) {
+        Linking.openURL(`package:${APP_PACKAGE}`).catch(() => {});
+      }
+    }
+  }, []);
+
+  const launchApkInstaller = useCallback(async (file) => {
+    const contentUri = file.contentUri;
+    if (!contentUri) throw new Error('missing contentUri');
+    await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+      data: contentUri,
+      flags: INSTALL_INTENT_FLAGS,
+      type: 'application/vnd.android.package-archive',
+    });
+  }, []);
 
   const downloadAndInstall = useCallback(async () => {
-    const url = downloadUrl || RELEASES_PAGE;
     if (Platform.OS !== 'android') {
-      Linking.openURL(url).catch(() => {});
+      Linking.openURL(downloadUrl || RELEASES_PAGE).catch(() => {});
+      return;
+    }
+    if (!downloadUrl) {
+      setInstallError('未找到可下载的 APK，请到 GitHub Releases 手动安装。');
       return;
     }
     if (downloading) return;
+
     setDownloading(true);
     setDownloadProgress(0);
+    setInstallError('');
+
+    const candidates = buildDownloadCandidates(downloadUrl);
+    let lastError = null;
+    let downloadedFile = null;
+
     try {
-      const fileUri = FileSystem.cacheDirectory + 'update.apk';
-      const existing = await FileSystem.getInfoAsync(fileUri);
-      if (existing.exists) await FileSystem.deleteAsync(fileUri, { idempotent: true });
-
-      const download = FileSystem.createDownloadResumable(
-        url,
-        fileUri,
-        {},
-        (progress) => {
-          if (progress.totalBytesExpectedToWrite > 0) {
-            setDownloadProgress(
-              Math.round((progress.totalBytesWritten / progress.totalBytesExpectedToWrite) * 100)
-            );
+      for (const url of candidates) {
+        try {
+          const destination = new File(Paths.cache, 'update.apk');
+          // createDownloadTask 不覆盖已有文件，先清掉上次残留
+          if (destination.exists) {
+            try { destination.delete(); } catch (_) { /* ignore */ }
           }
-        },
-      );
-      const result = await download.downloadAsync();
-      if (!result || !result.uri) throw new Error('download failed');
+          // 新 File API：带进度下载到缓存目录
+          const task = File.createDownloadTask(url, destination, {
+            headers: { Accept: 'application/octet-stream' },
+            onProgress: ({ bytesWritten, totalBytes }) => {
+              if (totalBytes > 0) {
+                setDownloadProgress(Math.min(99, Math.round((bytesWritten / totalBytes) * 100)));
+              }
+            },
+          });
+          const file = await task.downloadAsync();
+          if (!file || !file.exists) throw new Error('download returned empty file');
+          // 极小的文件多半是错误页 HTML，而不是 APK
+          if (typeof file.size === 'number' && file.size > 0 && file.size < 50 * 1024) {
+            try { file.delete(); } catch (_) { /* ignore */ }
+            throw new Error(`downloaded file too small (${file.size} bytes)`);
+          }
+          downloadedFile = file;
+          setDownloadProgress(100);
+          break;
+        } catch (e) {
+          lastError = e;
+          console.warn('[update] download attempt failed', url, e);
+        }
+      }
 
-      const contentUri = await FileSystem.getContentUriAsync(result.uri);
-      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: contentUri,
-        flags: 1,
-        type: 'application/vnd.android.package-archive',
-      });
+      if (!downloadedFile) {
+        throw lastError || new Error('all download mirrors failed');
+      }
+
+      try {
+        await launchApkInstaller(downloadedFile);
+      } catch (e) {
+        console.warn('[update] install intent failed', e);
+        setInstallError('已下载，但无法打开安装器。请允许本应用「安装未知应用」后重试。');
+      }
     } catch (e) {
-      Linking.openURL(url).catch(() => {});
+      console.warn('[update] download failed', e);
+      setInstallError('应用内下载失败。可重试，或允许安装未知应用后再次下载。');
     } finally {
       setDownloading(false);
-      setDownloadProgress(0);
     }
-  }, [downloadUrl, downloading]);
+  }, [downloadUrl, downloading, launchApkInstaller]);
 
   const openUrl = useCallback((url) => {
     Linking.openURL(url).catch(() => {});
@@ -260,21 +338,49 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
         {status === 'error' && (
           <Text style={styles.statusError}>检查失败，请检查网络后重试</Text>
         )}
+        {status === 'no_apk' && (
+          <View style={styles.updateHint}>
+            <Text style={styles.statusError}>
+              发现新版本 {latestVersion}，但 Release 里没有 APK 附件。
+            </Text>
+            <Pressable style={styles.linkBtn} onPress={() => openUrl(RELEASES_PAGE)}>
+              <Text style={styles.linkBtnText}>打开发布页</Text>
+            </Pressable>
+          </View>
+        )}
         {status === 'update' && (
           <Pressable style={styles.updateBtn} onPress={downloadAndInstall} disabled={downloading}>
             {downloading ? (
               <View style={styles.updateProgress}>
                 <ActivityIndicator size="small" color="#fff" />
                 <Text style={styles.updateBtnText}>
-                  下载中 {downloadProgress}%
+                  {downloadProgress >= 100 ? '正在打开安装…' : `下载中 ${downloadProgress}%`}
                 </Text>
               </View>
             ) : (
               <Text style={styles.updateBtnText}>
-                发现新版本 {latestVersion} · 下载安装
+                发现新版本 {latestVersion} · 应用内下载安装
               </Text>
             )}
           </Pressable>
+        )}
+        {!!installError && (
+          <View style={styles.updateHint}>
+            <Text style={styles.statusError}>{installError}</Text>
+            <View style={styles.hintActions}>
+              <Pressable style={styles.linkBtn} onPress={openInstallPermissionSettings}>
+                <Text style={styles.linkBtnText}>允许安装未知应用</Text>
+              </Pressable>
+              {!!downloadUrl && !downloading && (
+                <Pressable style={styles.linkBtn} onPress={downloadAndInstall}>
+                  <Text style={styles.linkBtnText}>重试下载</Text>
+                </Pressable>
+              )}
+              <Pressable style={styles.linkBtn} onPress={() => openUrl(RELEASES_PAGE)}>
+                <Text style={styles.linkBtnText}>浏览器打开</Text>
+              </Pressable>
+            </View>
+          </View>
         )}
       </View>
     </ScrollView>
@@ -340,7 +446,7 @@ const styles = createThemedStyles((colors) => ({
   checkBtnDisabled: { opacity: 0.7 },
   checkBtnText: { fontSize: 14, fontWeight: '800', color: colors.primary },
   statusOk: { marginTop: 12, fontSize: 13, fontWeight: '700', color: colors.textSoft },
-  statusError: { marginTop: 12, fontSize: 13, fontWeight: '700', color: colors.danger },
+  statusError: { marginTop: 12, fontSize: 13, fontWeight: '700', color: colors.danger, lineHeight: 20 },
   updateBtn: {
     marginTop: 12,
     paddingVertical: 12,
@@ -350,6 +456,15 @@ const styles = createThemedStyles((colors) => ({
   },
   updateBtnText: { fontSize: 14, fontWeight: '800', color: colors.white },
   updateProgress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  updateHint: { marginTop: 4 },
+  hintActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  linkBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: colors.primarySoft,
+  },
+  linkBtnText: { fontSize: 13, fontWeight: '800', color: colors.primary },
   aboutRow: {
     flexDirection: 'row',
     alignItems: 'center',
