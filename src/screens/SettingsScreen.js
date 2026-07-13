@@ -80,6 +80,7 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
   const [status, setStatus] = useState(null);
   const [latestVersion, setLatestVersion] = useState('');
   const [downloadUrl, setDownloadUrl] = useState('');
+  const [releaseNotes, setReleaseNotes] = useState('');
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [installError, setInstallError] = useState('');
@@ -101,6 +102,7 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
     setChecking(true);
     setStatus(null);
     setInstallError('');
+    setReleaseNotes('');
     try {
       let data = null;
       for (const api of API_MIRRORS) {
@@ -122,8 +124,11 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
       );
       // 只接受真正的 APK 直链，避免把 Releases 网页当安装包下载
       const apkUrl = apkAsset?.browser_download_url || '';
+      // GitHub Release 正文（手动写的 notes 或 CI generate_release_notes）
+      const notes = typeof data?.body === 'string' ? data.body.trim() : '';
       setLatestVersion(tag);
       setDownloadUrl(apkUrl);
+      setReleaseNotes(notes);
       if (compareVersion(tag, APP_VERSION) <= 0) {
         setStatus('latest');
       } else if (!apkUrl) {
@@ -343,26 +348,40 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
             <Text style={styles.statusError}>
               发现新版本 {latestVersion}，但 Release 里没有 APK 附件。
             </Text>
+            {!!releaseNotes && (
+              <View style={styles.notesBox}>
+                <Text style={styles.notesTitle}>更新内容</Text>
+                <Text style={styles.notesBody}>{releaseNotes}</Text>
+              </View>
+            )}
             <Pressable style={styles.linkBtn} onPress={() => openUrl(RELEASES_PAGE)}>
               <Text style={styles.linkBtnText}>打开发布页</Text>
             </Pressable>
           </View>
         )}
         {status === 'update' && (
-          <Pressable style={styles.updateBtn} onPress={downloadAndInstall} disabled={downloading}>
-            {downloading ? (
-              <View style={styles.updateProgress}>
-                <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.updateBtnText}>
-                  {downloadProgress >= 100 ? '正在打开安装…' : `下载中 ${downloadProgress}%`}
-                </Text>
+          <View style={styles.updateBlock}>
+            {!!releaseNotes && (
+              <View style={styles.notesBox}>
+                <Text style={styles.notesTitle}>更新内容</Text>
+                <Text style={styles.notesBody}>{releaseNotes}</Text>
               </View>
-            ) : (
-              <Text style={styles.updateBtnText}>
-                发现新版本 {latestVersion} · 应用内下载安装
-              </Text>
             )}
-          </Pressable>
+            <Pressable style={styles.updateBtn} onPress={downloadAndInstall} disabled={downloading}>
+              {downloading ? (
+                <View style={styles.updateProgress}>
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={styles.updateBtnText}>
+                    {downloadProgress >= 100 ? '正在打开安装…' : `下载中 ${downloadProgress}%`}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.updateBtnText}>
+                  发现新版本 {latestVersion} · 应用内下载安装
+                </Text>
+              )}
+            </Pressable>
+          </View>
         )}
         {!!installError && (
           <View style={styles.updateHint}>
@@ -447,6 +466,25 @@ const styles = createThemedStyles((colors) => ({
   checkBtnText: { fontSize: 14, fontWeight: '800', color: colors.primary },
   statusOk: { marginTop: 12, fontSize: 13, fontWeight: '700', color: colors.textSoft },
   statusError: { marginTop: 12, fontSize: 13, fontWeight: '700', color: colors.danger, lineHeight: 20 },
+  updateBlock: {},
+  notesBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: colors.primarySoft,
+  },
+  notesTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primary,
+    marginBottom: 8,
+  },
+  notesBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: colors.text,
+  },
   updateBtn: {
     marginTop: 12,
     paddingVertical: 12,

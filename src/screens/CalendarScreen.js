@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, Animated, Alert, TextInput, Platform, Modal,
-  KeyboardAvoidingView, PanResponder,
+  View, Text, ScrollView, Pressable, Animated, Alert, TextInput, Modal,
+  PanResponder,
 } from 'react-native';
 import { confirmAction } from '../confirm';
 import { colors, getShadow, createThemedStyles, getTileColor } from '../theme';
 import ActivityEditModal from '../components/ActivityEditModal';
+import MiniCalendar from '../components/MiniCalendar';
 import {
   dayKey, todayKey, friendlyDay, hhmm, monthGrid, monthLabel, WEEK_SHORT,
 } from '../date';
@@ -22,45 +23,6 @@ function pad2(n) {
 function dateKeyOf(ts) {
   const d = new Date(ts);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-// 内嵌小日历：点某天回调 key（YYYY-MM-DD）
-function MiniCalendar({ selected, onPick, maxKey }) {
-  const initY = Number((selected || '').slice(0, 4)) || new Date().getFullYear();
-  const initM = (Number((selected || '').slice(5, 7)) || (new Date().getMonth() + 1)) - 1;
-  const [y, setY] = useState(initY);
-  const [m, setM] = useState(initM);
-  const cells = monthGrid(y, m);
-  const prev = () => { if (m === 0) { setY(y - 1); setM(11); } else setM(m - 1); };
-  const next = () => { if (m === 11) { setY(y + 1); setM(0); } else setM(m + 1); };
-  return (
-    <View style={styles.calBox}>
-      <View style={styles.calHead}>
-        <Pressable onPress={prev} hitSlop={8} style={styles.calNav}><Text style={styles.calNavText}>‹</Text></Pressable>
-        <Text style={styles.calMonth}>{monthLabel(y, m)}</Text>
-        <Pressable onPress={next} hitSlop={8} style={styles.calNav}><Text style={styles.calNavText}>›</Text></Pressable>
-      </View>
-      <View style={styles.calWeekRow}>
-        {WEEK_SHORT.map((w, i) => (
-          <Text key={w} style={[styles.calWeekCell, (i === 0 || i === 6) && { color: colors.primary }]}>{w}</Text>
-        ))}
-      </View>
-      <View style={styles.calGrid}>
-        {cells.map((c, i) => {
-          if (!c.inMonth) return <View key={i} style={styles.calCell} />;
-          const sel = c.key === selected;
-          const disabled = maxKey && c.key > maxKey;
-          return (
-            <Pressable key={i} style={styles.calCell} disabled={disabled} onPress={() => onPick(c.key)}>
-              <View style={[styles.calDay, sel && styles.calDaySel, disabled && styles.calDayDisabled]}>
-                <Text style={[styles.calDayText, sel && styles.calDayTextSel, disabled && styles.calDayTextDisabled]}>{c.day}</Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
 }
 
 function WorkoutEditModal({ visible, workout, onClose, onSave }) {
@@ -900,25 +862,4 @@ const styles = createThemedStyles((colors) => ({
   editBtnPrimary: { backgroundColor: colors.primary },
   editBtnPrimaryText: { fontSize: 16, fontWeight: '800', color: colors.white },
 
-  // Mini calendar (date picker inside edit sheet)
-  calBox: { backgroundColor: colors.card, borderRadius: 16, padding: 12, marginBottom: 4 },
-  calHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  calNav: {
-    width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.bg,
-  },
-  calNavText: { fontSize: 18, color: colors.primary, fontWeight: '800' },
-  calMonth: { fontSize: 15, fontWeight: '800', color: colors.text },
-  calWeekRow: { flexDirection: 'row', marginBottom: 6 },
-  calWeekCell: { flex: 1, textAlign: 'center', fontSize: 12, color: colors.textSoft, fontWeight: '700' },
-  calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  calCell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
-  calDay: {
-    width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
-  },
-  calDaySel: { backgroundColor: colors.primary },
-  calDayDisabled: { opacity: 0.35 },
-  calDayText: { fontSize: 13, color: colors.text, fontWeight: '700' },
-  calDayTextSel: { color: colors.white },
-  calDayTextDisabled: { color: colors.textSoft },
-}));
+  }));

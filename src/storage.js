@@ -22,6 +22,20 @@ const K_MEMORY = 'dlt_exercise_memory';
 const K_BODYWEIGHT = 'dlt_bodyweight';
 const K_SETTINGS = 'dlt_settings';
 
+// 数据 schema 版本：后续结构变更可据此迁移
+export const STORAGE_SCHEMA_VERSION = 1;
+const META_KEY = '__meta';
+
+const DEFAULT_SETTINGS = {
+  fitnessPriorityMode: false,
+  darkMode: false,
+  lightTheme: 'coral',
+  fitnessPartLayout: 'list',
+  fitnessExerciseLayout: 'list',
+  fitnessPartOrder: [],
+  fitnessExerciseModes: {},
+};
+
 // ---- Web：用 localStorage ----
 const webStore = {
   read(key, fallback) {
@@ -88,17 +102,67 @@ if (Platform.OS !== 'web') {
 
 const store = Platform.OS === 'web' ? webStore : nativeStore;
 
+// 写入防抖：快速连续更新只落盘最后一次，降低主线程 IO
+const writeTimers = Object.create(null);
+const WRITE_DEBOUNCE_MS = 120;
+
+function writeNow(key, data) {
+  store.write(key, data);
+}
+
+function writeDebounced(key, data) {
+  if (writeTimers[key]) clearTimeout(writeTimers[key]);
+  writeTimers[key] = setTimeout(() => {
+    writeTimers[key] = null;
+    writeNow(key, data);
+  }, WRITE_DEBOUNCE_MS);
+}
+
+// 立即刷盘（可选，给卸载/切后台用）
+export function flushStorage() {
+  for (const key of Object.keys(writeTimers)) {
+    if (writeTimers[key]) {
+      clearTimeout(writeTimers[key]);
+      writeTimers[key] = null;
+    }
+  }
+}
+
+function ensureSchemaVersion() {
+  const settings = store.read(K_SETTINGS, null);
+  if (settings && typeof settings === 'object' && settings[META_KEY]?.schemaVersion) return;
+  // 老数据没有 meta：写入当前版本，不改业务字段
+  if (settings && typeof settings === 'object') {
+    store.write(K_SETTINGS, {
+      ...settings,
+      [META_KEY]: { schemaVersion: STORAGE_SCHEMA_VERSION },
+    });
+  }
+}
+
+function withMeta(settings) {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...settings,
+    [META_KEY]: {
+      ...(settings?.[META_KEY] || {}),
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+    },
+  };
+}
+
 export async function loadActivities() {
+  ensureSchemaVersion();
   const data = store.read(K_ACTIVITIES, null);
   if (data === null) {
-    store.write(K_ACTIVITIES, DEFAULT_ACTIVITIES);
+    writeNow(K_ACTIVITIES, DEFAULT_ACTIVITIES);
     return DEFAULT_ACTIVITIES;
   }
   return data;
 }
 
 export async function saveActivities(activities) {
-  store.write(K_ACTIVITIES, activities);
+  writeDebounced(K_ACTIVITIES, activities);
 }
 
 export async function loadLogs() {
@@ -106,7 +170,7 @@ export async function loadLogs() {
 }
 
 export async function saveLogs(logs) {
-  store.write(K_LOGS, logs);
+  writeDebounced(K_LOGS, logs);
 }
 
 // ---- 健身模块 ----
@@ -116,7 +180,7 @@ export async function loadWorkouts() {
 }
 
 export async function saveWorkouts(workouts) {
-  store.write(K_WORKOUTS, workouts);
+  writeDebounced(K_WORKOUTS, workouts);
 }
 
 export const BODY_PARTS = [
@@ -142,7 +206,7 @@ const DEFAULT_EXERCISES = {
 export async function loadExercises() {
   const data = store.read(K_EXERCISES, null);
   if (data === null) {
-    store.write(K_EXERCISES, DEFAULT_EXERCISES);
+    writeNow(K_EXERCISES, DEFAULT_EXERCISES);
     return DEFAULT_EXERCISES;
   }
   // 兜底：补齐后来新增的部位 key
@@ -152,7 +216,7 @@ export async function loadExercises() {
 }
 
 export async function saveExercises(map) {
-  store.write(K_EXERCISES, map);
+  writeDebounced(K_EXERCISES, map);
 }
 
 // ---- 动作记忆（记住每个动作最近一次的组数/重量/次数）----
@@ -161,7 +225,7 @@ export async function loadMemory() {
 }
 
 export async function saveMemory(mem) {
-  store.write(K_MEMORY, mem);
+  writeDebounced(K_MEMORY, mem);
 }
 
 // ---- 体重记录 ----
@@ -170,29 +234,24 @@ export async function loadBodyWeight() {
 }
 
 export async function saveBodyWeight(list) {
-  store.write(K_BODYWEIGHT, list);
+  writeDebounced(K_BODYWEIGHT, list);
 }
 
 // ---- 应用设置 ----
-const DEFAULT_SETTINGS = {
-  fitnessPriorityMode: false,
-  darkMode: false,
-  lightTheme: 'coral',
-  fitnessPartLayout: 'list',
-  fitnessExerciseLayout: 'list',
-  fitnessPartOrder: [],
-  fitnessExerciseModes: {},
-};
-
 export async function loadSettings() {
+  ensureSchemaVersion();
   const data = store.read(K_SETTINGS, null);
   if (data === null) {
-    store.write(K_SETTINGS, DEFAULT_SETTINGS);
-    return DEFAULT_SETTINGS;
+    const initial = withMeta(DEFAULT_SETTINGS);
+    writeNow(K_SETTINGS, initial);
+    return { ...DEFAULT_SETTINGS };
   }
-  return { ...DEFAULT_SETTINGS, ...data };
+  const { [META_KEY]: _meta, ...rest } = data;
+  return { ...DEFAULT_SETTINGS, ...rest };
 }
 
 export async function saveSettings(settings) {
-  store.write(K_SETTINGS, { ...DEFAULT_SETTINGS, ...settings });
+  // 业务层不应依赖 __meta；写盘时补上 schema 版本
+  const { [META_KEY]: _drop, ...rest } = settings || {};
+  writeDebounced(K_SETTINGS, withMeta(rest));
 }
