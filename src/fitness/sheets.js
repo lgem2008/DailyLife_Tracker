@@ -258,11 +258,12 @@ function BodyWeightSheet({ value, onChange, summary, chartData, onSave, onDelete
 }
 
 function ExerciseCreateSheet({ title = '新增动作', subtitle = '设置这个动作要记录什么', name, mode, onChangeName, onChangeMode, onSave, onClose }) {
-  const canSave = name.trim().length > 0;
+  const safeMode = mode || DEFAULT_EXERCISE_MODE;
+  const canSave = String(name || '').trim().length > 0;
   const kbHeight = useKeyboardHeight();
   const toggle = (key) => {
     select();
-    onChangeMode({ ...mode, [key]: !mode[key] });
+    onChangeMode({ ...safeMode, [key]: !safeMode[key] });
   };
 
   return (
@@ -289,7 +290,7 @@ function ExerciseCreateSheet({ title = '新增动作', subtitle = '设置这个�
           >
             <TextInput
               style={styles.createInput}
-              value={name}
+              value={name || ''}
               onChangeText={onChangeName}
               placeholder="动作名称"
               placeholderTextColor={colors.textSoft}
@@ -303,7 +304,7 @@ function ExerciseCreateSheet({ title = '新增动作', subtitle = '设置这个�
                 { key: 'reps', title: '次数', sub: '例如 12 次' },
                 { key: 'sets', title: '是否多组', sub: '需要记录第 1/2/3 组' },
               ].map((item) => {
-                const on = !!mode[item.key];
+                const on = !!safeMode[item.key];
                 return (
                   <Pressable
                     key={item.key}
@@ -321,7 +322,7 @@ function ExerciseCreateSheet({ title = '新增动作', subtitle = '设置这个�
                 );
               })}
 
-              {mode.sets && (
+              {safeMode.sets && (
                 <View style={styles.createCountRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.createModeTitle}>组数</Text>
@@ -329,14 +330,14 @@ function ExerciseCreateSheet({ title = '新增动作', subtitle = '设置这个�
                   </View>
                   <View style={styles.createCountStepper}>
                     <StepperField
-                      value={mode.setCount === '' ? '' : String(clampSetCount(mode.setCount))}
+                      value={safeMode.setCount === '' ? '' : String(clampSetCount(safeMode.setCount))}
                       step={1}
                       min={1}
                       keyboardType="number-pad"
                       placeholder="组数"
                       onChange={(v) => {
                         const digits = v.replace(/[^0-9]/g, '');
-                        onChangeMode({ ...mode, setCount: digits === '' ? '' : clampSetCount(digits) });
+                        onChangeMode({ ...safeMode, setCount: digits === '' ? '' : clampSetCount(digits) });
                       }}
                     />
                   </View>
@@ -360,8 +361,15 @@ function ExerciseCreateSheet({ title = '新增动作', subtitle = '设置这个�
 
 function EditWorkoutModal({ workout, noWeight, mode, onSave, onCancel }) {
   const recordMode = mode || (noWeight ? { weight: false, reps: true, sets: true } : DEFAULT_EXERCISE_MODE);
-  const [sets, setSets] = useState(workout.sets.map((s) => ({ ...s })));
-  const initDate = new Date(workout.ts);
+  // 旧数据可能没有 sets，直接 .map 会闪退
+  const initialSets = (Array.isArray(workout?.sets) && workout.sets.length > 0)
+    ? workout.sets.map((s) => ({ weight: s?.weight != null ? String(s.weight) : '', reps: s?.reps != null ? String(s.reps) : '' }))
+    : [{ weight: '', reps: '' }];
+  const [sets, setSets] = useState(initialSets);
+  const initDate = (() => {
+    const d = workout?.ts ? new Date(workout.ts) : new Date();
+    return Number.isNaN(d.getTime()) ? new Date() : d;
+  })();
   const pad = (n) => String(n).padStart(2, '0');
   const [dateStr, setDateStr] = useState(
     `${initDate.getFullYear()}-${pad(initDate.getMonth() + 1)}-${pad(initDate.getDate())}`
@@ -372,11 +380,15 @@ function EditWorkoutModal({ workout, noWeight, mode, onSave, onCancel }) {
   const [showCal, setShowCal] = useState(false);
   const kbHeight = useKeyboardHeight();
 
-  const changeSet = (i, v) => setSets(sets.map((s, k) => (k === i ? v : s)));
-  const removeSet = (i) => setSets(sets.length > 1 ? sets.filter((_, k) => k !== i) : sets);
+  if (!workout) return null;
+
+  const changeSet = (i, v) => setSets((prev) => prev.map((s, k) => (k === i ? v : s)));
+  const removeSet = (i) => setSets((prev) => (prev.length > 1 ? prev.filter((_, k) => k !== i) : prev));
   const addSet = () => {
-    const last = sets[sets.length - 1] || { weight: '', reps: '' };
-    setSets([...sets, { weight: last.weight, reps: last.reps }]);
+    setSets((prev) => {
+      const last = prev[prev.length - 1] || { weight: '', reps: '' };
+      return [...prev, { weight: last.weight, reps: last.reps }];
+    });
   };
 
   const save = () => {
@@ -391,15 +403,17 @@ function EditWorkoutModal({ workout, noWeight, mode, onSave, onCancel }) {
     let ts = workout.ts;
     if (dm && tm) {
       const d = new Date(Number(dm[1]), Number(dm[2]) - 1, Number(dm[3]), Number(tm[1]), Number(tm[2]));
-      if (!isNaN(d.getTime())) ts = d.toISOString();
+      if (!Number.isNaN(d.getTime())) ts = d.toISOString();
     }
     onSave({ ...workout, sets: clean, ts });
   };
 
   return (
     <View style={[styles.modalOverlay, kbHeight > 0 && { paddingBottom: kbHeight, justifyContent: 'flex-end' }]}>
+      <Pressable style={styles.modalBackdrop} onPress={onCancel} />
       <View style={[styles.modalCard, getShadow()]}>
         <Text style={styles.modalTitle}>编辑记录</Text>
+        <Text style={styles.modalSub}>{workout.exercise || '训练'}</Text>
         <Text style={styles.modalLabel}>日期时间</Text>
         <View style={styles.modalTimeRow}>
           <Pressable
@@ -431,7 +445,7 @@ function EditWorkoutModal({ workout, noWeight, mode, onSave, onCancel }) {
           </View>
         )}
         <Text style={styles.modalLabel}>组数</Text>
-        <ScrollView style={{ maxHeight: 260 }}>
+        <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
           {sets.map((s, i) => (
             <SetRow
               key={i}

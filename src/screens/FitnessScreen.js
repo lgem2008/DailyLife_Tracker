@@ -223,7 +223,9 @@ export default function FitnessScreen({
   };
 
   const openEditExercise = (name) => {
+    if (!part || !name) return;
     select();
+    // 先打开编辑层，不急着拆掉当前部位上下文，避免偶发 part/exercise 竞态
     setEditingExercise(name);
     setCustomEx(name);
     setCustomMode(getExerciseMode(settings, part.key, name));
@@ -231,7 +233,7 @@ export default function FitnessScreen({
   };
 
   const saveEditedExercise = () => {
-    if (!editingExercise) return;
+    if (!editingExercise || !part) return;
     const oldName = editingExercise;
     const nextName = customEx.trim();
     if (!nextName) return;
@@ -239,8 +241,8 @@ export default function FitnessScreen({
       onRenameExercise(part.key, oldName, nextName);
       removeExerciseMode(part.key, oldName);
     }
-    saveExerciseMode(part.key, nextName, customMode);
-    const savedMode = customMode;
+    saveExerciseMode(part.key, nextName, customMode || DEFAULT_EXERCISE_MODE);
+    const savedMode = customMode || DEFAULT_EXERCISE_MODE;
     setEditingExercise(null);
     setCreateOpen(false);
     setCustomEx('');
@@ -577,23 +579,8 @@ export default function FitnessScreen({
         </ScrollView>
         </KeyboardAvoidingView>
 
-        {createOpen && (
-          <ExerciseCreateSheet
-            title={editingExercise ? '编辑动作' : '新增动作'}
-            subtitle={editingExercise ? '修改名称和记录方式' : '设置这个动作要记录什么'}
-            name={customEx}
-            mode={customMode}
-            onChangeName={setCustomEx}
-            onChangeMode={setCustomMode}
-            onSave={editingExercise ? saveEditedExercise : addCustom}
-            onClose={() => {
-              setCreateOpen(false);
-              setEditingExercise(null);
-            }}
-          />
-        )}
-
-        {exercise && (
+        {/* 编辑动作时盖住记录面板，避免两层同时抢手势；取消后回到记录 */}
+        {exercise && !createOpen && !editingWorkout && (
           <RecordSheet
             part={part}
             exercise={exercise}
@@ -603,12 +590,30 @@ export default function FitnessScreen({
             onChangeRec={changeRec}
             onSave={saveWorkout}
             onClose={() => setExercise(null)}
-            onEditExercise={() => { setExercise(null); openEditExercise(exercise); }}
+            onEditExercise={() => openEditExercise(exercise)}
             dateKey={recordDate}
             onChangeDate={setRecordDate}
             workouts={workouts}
             onDeleteWorkout={deleteWorkoutEntry}
             onEditWorkout={setEditingWorkout}
+          />
+        )}
+
+        {createOpen && (
+          <ExerciseCreateSheet
+            title={editingExercise ? '编辑动作' : '新增动作'}
+            subtitle={editingExercise ? '修改名称和记录方式' : '设置这个动作要记录什么'}
+            name={customEx}
+            mode={customMode || DEFAULT_EXERCISE_MODE}
+            onChangeName={setCustomEx}
+            onChangeMode={setCustomMode}
+            onSave={editingExercise ? saveEditedExercise : addCustom}
+            onClose={() => {
+              setCreateOpen(false);
+              setEditingExercise(null);
+              setCustomEx('');
+              setCustomMode(DEFAULT_EXERCISE_MODE);
+            }}
           />
         )}
 
@@ -618,7 +623,7 @@ export default function FitnessScreen({
             mode={getExerciseMode(settings, editingWorkout.part, editingWorkout.exercise)}
             onCancel={() => setEditingWorkout(null)}
             onSave={(next) => {
-              onUpdateWorkout(next);
+              if (onUpdateWorkout) onUpdateWorkout(next);
               setEditingWorkout(null);
             }}
           />

@@ -77,8 +77,29 @@ jobs:
         working-directory: android
         run: chmod +x gradlew && ./gradlew assembleRelease
 
+      - name: Build release notes
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME}"
+          # 上一个 tag（按版本排序），用于截取本次提交
+          PREV=$(git tag --sort=-v:refname | awk -v cur="$TAG" '$0!=cur{print; exit}')
+          {
+            echo "## 更新内容"
+            echo ""
+            if [ -n "$PREV" ]; then
+              git log "${PREV}..HEAD" --pretty=format:'- %s' --no-merges
+              echo ""
+            else
+              git log -20 --pretty=format:'- %s' --no-merges
+              echo ""
+            fi
+          } > release_notes.md
+          echo "---- release_notes.md ----"
+          cat release_notes.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: android/app/build/outputs/apk/release/app-release.apk
-          generate_release_notes: true
+          body_path: release_notes.md
+          generate_release_notes: false

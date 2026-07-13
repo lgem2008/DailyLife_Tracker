@@ -408,10 +408,15 @@ const styles = createThemedStyles((colors) => ({
   // Edit modal
   modalOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center', padding: 14, zIndex: 100,
+    alignItems: 'center', justifyContent: 'center', padding: 14, zIndex: 100,
+  },
+  modalBackdrop: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
   modalCard: { backgroundColor: colors.card, borderRadius: 22, padding: 18, width: '100%', maxWidth: 420 },
-  modalTitle: { fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 12 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 4 },
+  modalSub: { fontSize: 13, fontWeight: '700', color: colors.textSoft, marginBottom: 12 },
   modalLabel: { fontSize: 13, fontWeight: '800', color: colors.textSoft, marginBottom: 6, marginTop: 4 },
   modalTimeRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
   modalDateInput: {

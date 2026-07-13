@@ -20,13 +20,14 @@ function ExerciseHistory({ workouts, part, exercise, noWeight, mode, onDelete, o
       .filter((w) => w.part === part && w.exercise === exercise)
       .sort((a, b) => (a.ts < b.ts ? 1 : -1));
     return mine.map((w) => {
-      const weights = w.sets.map((s) => Number(s.weight) || 0);
+      const sets = Array.isArray(w.sets) ? w.sets : [];
+      const weights = sets.map((s) => Number(s?.weight) || 0);
       const top = weights.length ? Math.max(...weights) : 0;
-      const totalReps = w.sets.reduce((sum, s) => sum + (Number(s.reps) || 0), 0);
-      const volume = w.sets.reduce(
-        (sum, s) => sum + (Number(s.weight) || 0) * (Number(s.reps) || 0), 0,
+      const totalReps = sets.reduce((sum, s) => sum + (Number(s?.reps) || 0), 0);
+      const volume = sets.reduce(
+        (sum, s) => sum + (Number(s?.weight) || 0) * (Number(s?.reps) || 0), 0,
       );
-      return { ...w, top, volume, totalReps };
+      return { ...w, sets, top, volume, totalReps };
     });
   }, [workouts, part, exercise]);
 

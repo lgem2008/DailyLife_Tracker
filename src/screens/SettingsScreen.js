@@ -70,6 +70,42 @@ function buildDownloadCandidates(rawUrl) {
   return urls;
 }
 
+// 把 GitHub Release markdown 正文收成可读的要点列表
+function parseReleaseNotes(body) {
+  if (!body || typeof body !== 'string') return [];
+  const items = [];
+  for (const raw of body.split(/\r?\n/)) {
+    let line = String(raw || '').trim();
+    if (!line) continue;
+    if (/full\s*changelog/i.test(line)) continue;
+    if (/^https?:\/\/\S+$/i.test(line)) continue;
+    if (/compare\/v?\d/i.test(line)) continue;
+    // 标题 / 加粗 / 列表符
+    line = line.replace(/^#+\s*/, '');
+    line = line.replace(/\*\*/g, '');
+    line = line.replace(/^[-*•]\s+/, '');
+    line = line.replace(/^\d+[\.)]\s+/, '');
+    // "xxx by @user in https://..."
+    line = line.replace(/\s+by\s+@[\w-]+.*$/i, '');
+    line = line.replace(/\s+in\s+https?:\/\/\S+/gi, '');
+    line = line.replace(/https?:\/\/\S+/gi, '').trim();
+    if (!line) continue;
+    if (/^(what's changed|changes|更新内容|changelog)$/i.test(line)) continue;
+    if (line.length < 2) continue;
+    items.push(line);
+  }
+  // 去重，最多 12 条
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    if (seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
 export default function SettingsScreen({ settings, onChangeSettings }) {
   const fitnessPriorityMode = !!settings?.fitnessPriorityMode;
   const darkMode = !!settings?.darkMode;
@@ -80,7 +116,7 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
   const [status, setStatus] = useState(null);
   const [latestVersion, setLatestVersion] = useState('');
   const [downloadUrl, setDownloadUrl] = useState('');
-  const [releaseNotes, setReleaseNotes] = useState('');
+  const [releaseNotes, setReleaseNotes] = useState([]);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [installError, setInstallError] = useState('');
@@ -102,7 +138,7 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
     setChecking(true);
     setStatus(null);
     setInstallError('');
-    setReleaseNotes('');
+    setReleaseNotes([]);
     try {
       let data = null;
       for (const api of API_MIRRORS) {
@@ -124,8 +160,8 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
       );
       // 只接受真正的 APK 直链，避免把 Releases 网页当安装包下载
       const apkUrl = apkAsset?.browser_download_url || '';
-      // GitHub Release 正文（手动写的 notes 或 CI generate_release_notes）
-      const notes = typeof data?.body === 'string' ? data.body.trim() : '';
+      // GitHub Release 正文 → 可读要点
+      const notes = parseReleaseNotes(typeof data?.body === 'string' ? data.body : '');
       setLatestVersion(tag);
       setDownloadUrl(apkUrl);
       setReleaseNotes(notes);
@@ -348,26 +384,41 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
             <Text style={styles.statusError}>
               发现新版本 {latestVersion}，但 Release 里没有 APK 附件。
             </Text>
-            {!!releaseNotes && (
-              <View style={styles.notesBox}>
-                <Text style={styles.notesTitle}>更新内容</Text>
-                <Text style={styles.notesBody}>{releaseNotes}</Text>
-              </View>
-            )}
-            <Pressable style={styles.linkBtn} onPress={() => openUrl(RELEASES_PAGE)}>
-              <Text style={styles.linkBtnText}>打开发布页</Text>
+            <View style={styles.notesBox}>
+              <Text style={styles.notesTitle}>更新内容</Text>
+              {releaseNotes.length > 0 ? (
+                releaseNotes.map((line, idx) => (
+                  <View key={`${idx}-${line.slice(0, 12)}`} style={styles.noteRow}>
+                    <Text style={styles.noteBullet}>•</Text>
+                    <Text style={styles.noteLine}>{line}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.notesEmpty}>暂无详细说明，可到发布页查看</Text>
+              )}
+            </View>
+            <Pressable style={styles.browserBtn} onPress={() => openUrl(RELEASES_PAGE)}>
+              <Text style={styles.browserBtnText}>浏览器打开发布页</Text>
             </Pressable>
           </View>
         )}
         {status === 'update' && (
           <View style={styles.updateBlock}>
             <Text style={styles.updateFound}>发现新版本 {latestVersion}</Text>
-            {!!releaseNotes && (
-              <View style={styles.notesBox}>
-                <Text style={styles.notesTitle}>更新内容</Text>
-                <Text style={styles.notesBody}>{releaseNotes}</Text>
-              </View>
-            )}
+            <View style={styles.notesBox}>
+              <Text style={styles.notesTitle}>更新内容</Text>
+              {releaseNotes.length > 0 ? (
+                releaseNotes.map((line, idx) => (
+                  <View key={`${idx}-${line.slice(0, 12)}`} style={styles.noteRow}>
+                    <Text style={styles.noteBullet}>•</Text>
+                    <Text style={styles.noteLine}>{line}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.notesEmpty}>暂无详细说明，可到发布页查看</Text>
+              )}
+            </View>
+            <Text style={styles.updateChoiceHint}>选择安装方式</Text>
             <Pressable style={styles.updateBtn} onPress={downloadAndInstall} disabled={downloading}>
               {downloading ? (
                 <View style={styles.updateProgress}>
@@ -385,7 +436,7 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
               onPress={() => openUrl(RELEASES_PAGE)}
               disabled={downloading}
             >
-              <Text style={styles.browserBtnText}>浏览器打开发布页</Text>
+              <Text style={styles.browserBtnText}>浏览器打开</Text>
             </Pressable>
           </View>
         )}
@@ -474,32 +525,61 @@ const styles = createThemedStyles((colors) => ({
   statusError: { marginTop: 12, fontSize: 13, fontWeight: '700', color: colors.danger, lineHeight: 20 },
   updateBlock: { marginTop: 12 },
   updateFound: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
     color: colors.text,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   notesBox: {
     marginTop: 10,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: colors.primarySoft,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.line,
   },
   notesTitle: {
     fontSize: 13,
     fontWeight: '800',
     color: colors.primary,
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  notesBody: {
+  noteRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+    gap: 8,
+  },
+  noteBullet: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: colors.primary,
+    lineHeight: 20,
+    width: 12,
+  },
+  noteLine: {
+    flex: 1,
     fontSize: 13,
     lineHeight: 20,
     fontWeight: '600',
     color: colors.text,
   },
+  notesEmpty: {
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: colors.textSoft,
+  },
+  updateChoiceHint: {
+    marginTop: 14,
+    marginBottom: 2,
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textSoft,
+  },
   updateBtn: {
-    marginTop: 12,
-    paddingVertical: 12,
+    marginTop: 10,
+    paddingVertical: 13,
     borderRadius: 14,
     backgroundColor: colors.primary,
     alignItems: 'center',
@@ -507,7 +587,7 @@ const styles = createThemedStyles((colors) => ({
   updateBtnText: { fontSize: 14, fontWeight: '800', color: colors.white },
   browserBtn: {
     marginTop: 10,
-    paddingVertical: 12,
+    paddingVertical: 13,
     borderRadius: 14,
     backgroundColor: colors.primarySoft,
     alignItems: 'center',
