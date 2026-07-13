@@ -1,205 +1,331 @@
-import React, { useMemo } from 'react';
-import { View, Text } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, Pressable } from 'react-native';
 import { colors, getShadow } from '../theme';
-import { dayKey } from '../date';
 import { BODY_PARTS } from '../storage';
 import {
   CHART_HEIGHT,
-  workoutVolume,
-  workoutTopWeight,
   summarizeWorkouts,
   deltaText,
+  buildExerciseSeries,
+  formatStepValue,
+  getExerciseMode,
+  exerciseProgressMeta,
+  DEFAULT_EXERCISE_MODE,
 } from './utils';
 import styles from './styles';
 
-function FitnessStats({ workouts, bodyWeight }) {
-  const data = useMemo(() => {
+// 列表用迷你柱：高度 22，最多 8 根
+function Sparkline({ values = [], width = 56, height = 22 }) {
+  const nums = (values || []).map((v) => Number(v) || 0).filter((v) => v >= 0);
+  if (nums.length < 2) {
+    return <View style={[styles.sparkWrap, { width, height }]} />;
+  }
+  const max = Math.max(...nums, 0.0001);
+  const min = Math.min(...nums);
+  const range = Math.max(max - min, max * 0.15, 0.0001);
+  const barW = Math.max(3, Math.floor((width - (nums.length - 1) * 2) / nums.length));
+
+  return (
+    <View style={[styles.sparkWrap, { width, height }]}>
+      {nums.map((v, i) => {
+        const frac = (v - min) / range;
+        const h = Math.max(3, 4 + frac * (height - 4));
+        const isLast = i === nums.length - 1;
+        return (
+          <View
+            key={`${i}-${v}`}
+            style={[
+              styles.sparkBar,
+              {
+                width: barW,
+                height: h,
+                backgroundColor: isLast ? colors.primary : colors.primarySoft,
+              },
+            ]}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+function ProgressChart({ workouts, part, exercise, noWeight, mode, embedded = false }) {
+  const usesWeight = mode ? !!mode.weight : !noWeight;
+  const chartMode = mode || (usesWeight
+    ? { weight: true, reps: false, sets: true }
+    : { weight: false, reps: true, sets: true });
+  const [groupBy, setGroupBy] = useState('session'); // session | week
+
+  const data = useMemo(
+    () => buildExerciseSeries(workouts, part, exercise, chartMode, groupBy),
+    [workouts, part, exercise, chartMode, groupBy],
+  );
+
+  if (data.length < 1) return null;
+
+  const max = Math.max(...data.map((d) => d.value));
+  if (max === 0) return null;
+  const recent = data.slice(-10);
+  const unit = usesWeight ? 'kg' : '个';
+  const fmt = (v) => (usesWeight ? formatStepValue(v, 1) : String(Math.round(v)));
+
+  let paceText = null;
+  let runBest = 0;
+  const prs = [];
+  for (const p of data) {
+    if (p.value > runBest) {
+      prs.push(p);
+      runBest = p.value;
+    }
+  }
+  if (prs.length >= 2) {
+    const a = prs[prs.length - 2];
+    const b = prs[prs.length - 1];
+    const days = Math.max(0, Math.round((new Date(b.ts) - new Date(a.ts)) / 86400000));
+    if (days > 0) paceText = `上次加码间隔约 ${days} 天`;
+  }
+
+  return (
+    <View style={[styles.chartWrap, embedded && styles.chartWrapEmbedded]}>
+      <View style={styles.chartHead}>
+        <Text style={styles.chartLabel}>
+          {usesWeight ? '最大重量趋势' : '次数趋势'}
+        </Text>
+        <View style={styles.chartToggle}>
+          <Pressable
+            style={[styles.chartToggleBtn, groupBy === 'session' && styles.chartToggleBtnOn]}
+            onPress={() => setGroupBy('session')}
+          >
+            <Text style={[styles.chartToggleText, groupBy === 'session' && styles.chartToggleTextOn]}>按次</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.chartToggleBtn, groupBy === 'week' && styles.chartToggleBtnOn]}
+            onPress={() => setGroupBy('week')}
+          >
+            <Text style={[styles.chartToggleText, groupBy === 'week' && styles.chartToggleTextOn]}>按周</Text>
+          </Pressable>
+        </View>
+      </View>
+      {!!paceText && <Text style={styles.chartPace}>{paceText}</Text>}
+      <View style={styles.chartBox}>
+        <Text style={styles.chartYMax}>{fmt(max)}{unit}</Text>
+        <View style={styles.chartBars}>
+          {recent.map((d, i) => {
+            const h = max > 0 ? (d.value / max) * (CHART_HEIGHT - 24) : 0;
+            const isLast = i === recent.length - 1;
+            return (
+              <View key={`${d.key}_${i}`} style={styles.chartCol}>
+                <Text style={styles.chartVal}>{fmt(d.value)}</Text>
+                <View style={[styles.chartBar, { height: Math.max(4, h), backgroundColor: isLast ? colors.primary : colors.primarySoft }]} />
+                <Text style={styles.chartDay}>{d.label}</Text>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// 首页统计：速览 + 动作进展（点选动作看图，不必进动作页）
+function FitnessStats({ workouts, bodyWeight, settings }) {
+  const partMap = useMemo(() => {
+    const map = {};
+    for (const p of BODY_PARTS) map[p.key] = p;
+    return map;
+  }, []);
+
+  const weekData = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const dayMs = 86400000;
     const currentStart = todayStart - 6 * dayMs;
     const prevStart = todayStart - 13 * dayMs;
     const tomorrowStart = todayStart + dayMs;
-
     const inRange = (w, start, end) => {
       const t = new Date(w.ts).getTime();
       return t >= start && t < end;
     };
+    const current = (workouts || []).filter((w) => inRange(w, currentStart, tomorrowStart));
+    const previous = (workouts || []).filter((w) => inRange(w, prevStart, currentStart));
+    return {
+      cur: summarizeWorkouts(current),
+      prev: summarizeWorkouts(previous),
+    };
+  }, [workouts]);
 
-    const current = workouts.filter((w) => inRange(w, currentStart, tomorrowStart));
-    const previous = workouts.filter((w) => inRange(w, prevStart, currentStart));
-    const cur = summarizeWorkouts(current);
-    const prev = summarizeWorkouts(previous);
-
-    const partMap = {};
-    for (const p of BODY_PARTS) partMap[p.key] = p;
-    const partVolumes = current.reduce((acc, item) => {
-      const key = item.part;
-      if (!acc[key]) acc[key] = { key, volume: 0, sets: 0 };
-      acc[key].volume += workoutVolume(item);
-      acc[key].sets += item.sets.length;
-      return acc;
-    }, {});
-    const partRows = Object.values(partVolumes)
-      .sort((a, b) => b.volume - a.volume)
-      .slice(0, 4);
-    const maxPartVolume = Math.max(1, ...partRows.map((row) => row.volume));
-
+  const exerciseRows = useMemo(() => {
     const groups = {};
-    for (const item of workouts) {
-      const key = `${item.part}:${item.exercise}`;
-      (groups[key] = groups[key] || []).push(item);
+    for (const w of workouts || []) {
+      if (!w?.part || !w?.exercise) continue;
+      const key = `${w.part}:${w.exercise}`;
+      if (!groups[key]) groups[key] = { part: w.part, exercise: w.exercise, lastTs: w.ts };
+      if (w.ts > groups[key].lastTs) groups[key].lastTs = w.ts;
     }
-    const records = Object.values(groups).map((items) => {
-      const sorted = items.slice().sort((a, b) => (a.ts < b.ts ? -1 : 1));
-      const latest = sorted[sorted.length - 1];
-      const latestTop = workoutTopWeight(latest);
-      const prevBest = sorted
-        .slice(0, -1)
-        .reduce((mx, item) => Math.max(mx, workoutTopWeight(item)), 0);
-      return {
-        ...latest,
-        latestTop,
-        prevBest,
-        improved: latestTop > prevBest && latestTop > 0,
-      };
-    })
-      .filter((item) => item.improved)
-      .sort((a, b) => (a.ts < b.ts ? 1 : -1))
-      .slice(0, 3);
+    return Object.values(groups)
+      .map((row) => {
+        const mode = getExerciseMode(settings, row.part, row.exercise);
+        const progress = exerciseProgressMeta(workouts, row.part, row.exercise, mode);
+        return {
+          key: `${row.part}:${row.exercise}`,
+          part: row.part,
+          exercise: row.exercise,
+          lastTs: row.lastTs,
+          mode,
+          progress,
+        };
+      })
+      .filter((row) => row.progress && row.progress.count >= 1)
+      .sort((a, b) => (a.lastTs < b.lastTs ? 1 : -1));
+  }, [workouts, settings]);
 
-    const bw = bodyWeight.slice().sort((a, b) => (a.ts < b.ts ? -1 : 1));
-    const lastBw = bw[bw.length - 1];
-    const prevBw = bw.length > 1 ? bw[bw.length - 2] : null;
+  const [selectedKey, setSelectedKey] = useState(null);
+  const [filter, setFilter] = useState('recent'); // recent | up | all
 
-    return { cur, prev, partRows, maxPartVolume, records, partMap, lastBw, prevBw };
-  }, [workouts, bodyWeight]);
+  useEffect(() => {
+    if (exerciseRows.length === 0) {
+      setSelectedKey(null);
+      return;
+    }
+    if (!selectedKey || !exerciseRows.some((r) => r.key === selectedKey)) {
+      setSelectedKey(exerciseRows[0].key);
+    }
+  }, [exerciseRows, selectedKey]);
 
-  if (workouts.length === 0 && bodyWeight.length === 0) {
+  const filteredRows = useMemo(() => {
+    if (filter === 'up') {
+      return exerciseRows.filter((r) => (r.progress?.delta || 0) > 0).slice(0, 12);
+    }
+    if (filter === 'all') return exerciseRows.slice(0, 20);
+    return exerciseRows.slice(0, 8); // recent
+  }, [exerciseRows, filter]);
+
+  const selected = exerciseRows.find((r) => r.key === selectedKey) || filteredRows[0] || null;
+
+  const bw = useMemo(() => {
+    const list = (bodyWeight || []).slice().sort((a, b) => (a.ts < b.ts ? -1 : 1));
+    return { last: list[list.length - 1], prev: list.length > 1 ? list[list.length - 2] : null };
+  }, [bodyWeight]);
+
+  if ((workouts || []).length === 0 && (bodyWeight || []).length === 0) {
     return (
       <View style={[styles.statsCard, getShadow()]}>
         <Text style={styles.statsTitle}>统计</Text>
-        <Text style={styles.statsEmpty}>开始记录后，这里会显示训练趋势和突破</Text>
+        <Text style={styles.statsEmpty}>开始记录后，这里可直接查看各动作重量趋势</Text>
       </View>
     );
   }
 
-  const volumeDelta = deltaText(data.cur.volume, data.prev.volume);
-  const bwDelta = data.lastBw && data.prevBw
-    ? `${data.lastBw.value > data.prevBw.value ? '+' : ''}${(data.lastBw.value - data.prevBw.value).toFixed(1)}kg`
-    : '暂无对比';
+  const sessionDelta = deltaText(weekData.cur.sessions, weekData.prev.sessions, ' 次');
+  const bwDelta = bw.last && bw.prev
+    ? `${bw.last.value > bw.prev.value ? '+' : ''}${(bw.last.value - bw.prev.value).toFixed(1)}kg`
+    : null;
 
   return (
     <View style={[styles.statsCard, getShadow()]}>
       <View style={styles.statsHead}>
         <Text style={styles.statsTitle}>统计</Text>
-        <Text style={styles.statsRange}>最近 7 天</Text>
+        <Text style={styles.statsRange}>近 7 天</Text>
       </View>
 
-      <View style={styles.statsGrid}>
-        <View style={styles.statBox}>
-          <Text style={styles.statValue}>{data.cur.sessions}</Text>
+      <View style={styles.statsGridCompact}>
+        <View style={styles.statBoxCompact}>
+          <Text style={styles.statValue}>{weekData.cur.sessions}</Text>
           <Text style={styles.statLabel}>训练</Text>
-          <Text style={styles.statDelta}>{deltaText(data.cur.sessions, data.prev.sessions, ' 次')}</Text>
+          {!!sessionDelta && <Text style={styles.statDelta}>{sessionDelta}</Text>}
         </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statValue}>{data.cur.sets}</Text>
+        <View style={styles.statBoxCompact}>
+          <Text style={styles.statValue}>{weekData.cur.sets}</Text>
           <Text style={styles.statLabel}>组数</Text>
-          <Text style={styles.statDelta}>{deltaText(data.cur.sets, data.prev.sets, ' 组')}</Text>
         </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statValue}>{data.cur.maxWeight || '-'}</Text>
+        <View style={styles.statBoxCompact}>
+          <Text style={styles.statValue}>{weekData.cur.maxWeight || '-'}</Text>
           <Text style={styles.statLabel}>最大kg</Text>
-          <Text style={styles.statDelta}>容量 {volumeDelta}</Text>
         </View>
       </View>
 
-      {data.partRows.length > 0 && (
-        <View style={styles.partStats}>
-          {data.partRows.map((row) => {
-            const p = data.partMap[row.key];
-            const width = `${Math.max(8, (row.volume / data.maxPartVolume) * 100)}%`;
-            return (
-              <View key={row.key} style={styles.partStatRow}>
-                <Text style={styles.partStatLabel}>{p ? p.label : row.key}</Text>
-                <View style={styles.partStatTrack}>
-                  <View style={[styles.partStatFill, { width, backgroundColor: p ? p.color : colors.primarySoft }]} />
-                </View>
-                <Text style={styles.partStatValue}>{row.sets}组</Text>
-              </View>
-            );
-          })}
-        </View>
+      {bw.last && (
+        <Text style={styles.statsBwLine}>
+          体重 {bw.last.value}kg{bwDelta ? ` · ${bwDelta}` : ''}
+        </Text>
       )}
 
-      <View style={styles.statsFoot}>
-        {data.records.length > 0 ? (
-          data.records.map((item) => (
-            <Text key={item.id} style={styles.recordText} numberOfLines={1}>
-              {item.exercise} 新高 {item.latestTop}kg
-            </Text>
-          ))
-        ) : (
-          <Text style={styles.recordText}>本周还没有新的重量突破</Text>
-        )}
-        {data.lastBw && (
-          <Text style={styles.recordText}>体重 {data.lastBw.value}kg · {bwDelta}</Text>
-        )}
-      </View>
-    </View>
-  );
-}
+      <View style={styles.progressSection}>
+        <Text style={styles.progressSectionTitle}>动作进展</Text>
+        <Text style={styles.progressSectionHint}>点一个动作看趋势，不用点进动作页</Text>
 
-function ProgressChart({ workouts, part, exercise, noWeight }) {
-  const data = useMemo(() => {
-    const mine = workouts
-      .filter((w) => w.part === part && w.exercise === exercise)
-      .sort((a, b) => (a.ts < b.ts ? -1 : 1));
-    const byDay = {};
-    for (const w of mine) {
-      const k = dayKey(w.ts);
-      let v;
-      if (noWeight) {
-        v = w.sets.reduce((sum, s) => sum + (Number(s.reps) || 0), 0);
-      } else {
-        v = w.sets.reduce((mx, s) => Math.max(mx, Number(s.weight) || 0), 0);
-      }
-      byDay[k] = Math.max(byDay[k] || 0, v);
-    }
-    return Object.entries(byDay).map(([day, weight]) => ({ day, weight }));
-  }, [workouts, part, exercise, noWeight]);
-
-  if (data.length < 1) return null;
-
-  const max = Math.max(...data.map((d) => d.weight));
-  if (max === 0) return null;
-  const recent = data.slice(-10);
-  const unit = noWeight ? '个' : 'kg';
-
-  return (
-    <View style={styles.chartWrap}>
-      <Text style={styles.chartLabel}>{noWeight ? '每日总次数' : '最大重量趋势'}</Text>
-      <View style={styles.chartBox}>
-        <Text style={styles.chartYMax}>{max}{unit}</Text>
-        <View style={styles.chartBars}>
-          {recent.map((d, i) => {
-            const h = max > 0 ? (d.weight / max) * (CHART_HEIGHT - 24) : 0;
-            const isLast = i === recent.length - 1;
-            return (
-              <View key={d.day} style={styles.chartCol}>
-                <Text style={styles.chartVal}>{d.weight}</Text>
-                <View style={[styles.chartBar, { height: h, backgroundColor: isLast ? colors.primary : colors.primarySoft }]} />
-                <Text style={styles.chartDay}>{d.day.slice(5)}</Text>
-              </View>
-            );
-          })}
+        <View style={styles.progressFilters}>
+          {[
+            { key: 'recent', label: '最近' },
+            { key: 'up', label: '有进步' },
+            { key: 'all', label: '全部' },
+          ].map((item) => (
+            <Pressable
+              key={item.key}
+              style={[styles.progressFilterBtn, filter === item.key && styles.progressFilterBtnOn]}
+              onPress={() => setFilter(item.key)}
+            >
+              <Text style={[styles.progressFilterText, filter === item.key && styles.progressFilterTextOn]}>
+                {item.label}
+              </Text>
+            </Pressable>
+          ))}
         </View>
+
+        {filteredRows.length === 0 ? (
+          <Text style={styles.statsEmpty}>
+            {filter === 'up' ? '暂时没有近次上涨的动作' : '还没有可展示的动作趋势'}
+          </Text>
+        ) : (
+          <View style={styles.progressList}>
+            {filteredRows.map((row) => {
+              const on = selected && selected.key === row.key;
+              const part = partMap[row.part];
+              return (
+                <Pressable
+                  key={row.key}
+                  style={[styles.progressRow, on && styles.progressRowOn]}
+                  onPress={() => setSelectedKey(row.key)}
+                >
+                  <View style={styles.progressRowMain}>
+                    <Text style={styles.progressName} numberOfLines={1}>
+                      {part ? `${part.emoji} ` : ''}{row.exercise}
+                    </Text>
+                    <Text style={styles.progressMeta} numberOfLines={1}>
+                      {row.progress?.main || ''}{row.progress?.sub ? ` · ${row.progress.sub}` : ''}
+                    </Text>
+                  </View>
+                  {Array.isArray(row.progress?.spark) && row.progress.spark.length >= 2 ? (
+                    <Sparkline values={row.progress.spark} width={48} height={18} />
+                  ) : (
+                    <View style={{ width: 48 }} />
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+
+        {selected && (
+          <View style={styles.progressChartBox}>
+            <Text style={styles.progressChartTitle}>
+              {(partMap[selected.part]?.label || '') + ' · ' + selected.exercise}
+            </Text>
+            <ProgressChart
+              workouts={workouts}
+              part={selected.part}
+              exercise={selected.exercise}
+              mode={selected.mode || DEFAULT_EXERCISE_MODE}
+              embedded
+            />
+          </View>
+        )}
       </View>
     </View>
   );
 }
 
-// 体重趋势柱状图：基线取最小值放大波动，每根柱标注数值（自重图共用样式）
+// 体重趋势柱状图
 function WeightChart({ data }) {
   if (!data || data.length < 1) return null;
   const recent = data.slice(-12);
@@ -231,4 +357,4 @@ function WeightChart({ data }) {
   );
 }
 
-export { FitnessStats, ProgressChart, WeightChart };
+export { FitnessStats, ProgressChart, WeightChart, Sparkline };

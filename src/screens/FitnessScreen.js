@@ -445,7 +445,7 @@ export default function FitnessScreen({
           </View>
         </Pressable>
 
-        <FitnessStats workouts={workouts} bodyWeight={bodyWeight} />
+        <FitnessStats workouts={workouts} bodyWeight={bodyWeight} settings={settings} />
       </ScrollView>
       {bwOpen && (
         <BodyWeightSheet

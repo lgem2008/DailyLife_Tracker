@@ -68,7 +68,13 @@ function ExerciseHistory({ workouts, part, exercise, noWeight, mode, onDelete, o
 
   return (
     <View style={{ marginTop: 6 }}>
-      <ProgressChart workouts={workouts} part={part} exercise={exercise} noWeight={noWeight} />
+      <ProgressChart
+        workouts={workouts}
+        part={part}
+        exercise={exercise}
+        noWeight={noWeight}
+        mode={mode}
+      />
       {sessions.map((s, i) => {
         const prev = sessions[i + 1];
         let trend = null;

@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Animated, Easing, PanResponder } from 'react-native';
+import { View, Text, Pressable, Animated, Easing, PanResponder } from 'react-native';
 import { select } from '../haptics';
 import { getShadow, getTileColor, getTileBadgeColor } from '../theme';
 import {
   ROW_STRIDE,
   PART_ROW_STRIDE,
 } from './utils';
+import { Sparkline } from './charts';
 import styles from './styles';
 
 function DraggableRow({
@@ -153,6 +154,9 @@ function DraggableRow({
         {!editMode && (
           progress ? (
             <View style={styles.exProgress}>
+              {Array.isArray(progress.spark) && progress.spark.length >= 2 && (
+                <Sparkline values={progress.spark} width={52} height={20} />
+              )}
               <Text style={styles.exProgressMain} numberOfLines={1}>{progress.main}</Text>
               <Text style={styles.exProgressSub} numberOfLines={1}>{progress.sub}</Text>
             </View>

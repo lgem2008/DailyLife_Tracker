@@ -3,7 +3,7 @@ import { dayKey, friendlyDay } from '../date';
 export const GAP = 10;
 export const CHART_HEIGHT = 140;
 export const BAR_WIDTH = 28;
-export const ROW_HEIGHT = 66;
+export const ROW_HEIGHT = 74;
 export const ROW_GAP = 8;
 export const ROW_STRIDE = ROW_HEIGHT + ROW_GAP;
 export const PART_ROW_HEIGHT = 68;
@@ -116,9 +116,10 @@ export function workoutTopWeight(workout) {
 export function summarizeWorkouts(items) {
   const list = items || [];
   const sessions = list.length;
+  const sets = list.reduce((sum, w) => sum + ((w.sets && w.sets.length) || 0), 0);
   const volume = list.reduce((sum, w) => sum + workoutVolume(w), 0);
   const top = list.reduce((mx, w) => Math.max(mx, workoutTopWeight(w)), 0);
-  return { sessions, volume, top };
+  return { sessions, sets, volume, top, maxWeight: top };
 }
 
 export function deltaText(cur, prev, suffix = '') {
@@ -129,42 +130,109 @@ export function deltaText(cur, prev, suffix = '') {
   return `${sign}${formatStepValue(d, suffix === 'kg' ? 1 : 0)}${suffix}`;
 }
 
-export function exerciseProgressMeta(workouts, partKey, exercise, mode = DEFAULT_EXERCISE_MODE) {
+// ISO 周键：YYYY-Www，用于「按周」聚合
+export function weekKeyOf(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  // 周四决定本周归属年份（ISO）
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+export function workoutMetric(w, mode = DEFAULT_EXERCISE_MODE) {
+  const sets = Array.isArray(w?.sets) ? w.sets : [];
+  if (!mode.weight) {
+    return sets.reduce((sum, s) => sum + (Number(s?.reps) || 0), 0);
+  }
+  return sets.reduce((mx, s) => Math.max(mx, Number(s?.weight) || 0), 0);
+}
+
+// 单动作时间序列：session=每次训练；week=自然周最大
+export function buildExerciseSeries(workouts, partKey, exercise, mode = DEFAULT_EXERCISE_MODE, groupBy = 'session') {
   const mine = (workouts || [])
     .filter((w) => w.part === partKey && w.exercise === exercise)
     .sort((a, b) => (a.ts < b.ts ? -1 : 1));
-  if (mine.length === 0) return null;
 
-  const metricOf = (w) => (
-    !mode.weight
-      ? (w.sets || []).reduce((sum, s) => sum + (Number(s.reps) || 0), 0)
-      : workoutTopWeight(w)
-  );
+  if (groupBy === 'week') {
+    const byWeek = {};
+    for (const w of mine) {
+      const key = weekKeyOf(w.ts);
+      if (!key) continue;
+      const value = workoutMetric(w, mode);
+      const prev = byWeek[key];
+      if (!prev || value > prev.value) {
+        byWeek[key] = { key, value, ts: w.ts, label: key.slice(5) };
+      }
+    }
+    return Object.values(byWeek).sort((a, b) => (a.ts < b.ts ? -1 : 1));
+  }
 
-  let best = 0;
-  const records = [];
-  for (const item of mine) {
-    const value = metricOf(item);
-    if (value > best) {
-      best = value;
-      records.push({ value, ts: item.ts });
+  // 同一天多次：取当天最大
+  const byDay = {};
+  for (const w of mine) {
+    const key = dayKey(w.ts);
+    const value = workoutMetric(w, mode);
+    const prev = byDay[key];
+    if (!prev || value > prev.value) {
+      byDay[key] = { key, value, ts: w.ts, label: key.slice(5) };
     }
   }
+  return Object.values(byDay).sort((a, b) => (a.ts < b.ts ? -1 : 1));
+}
 
-  const latest = records[records.length - 1];
-  const previous = records.length > 1 ? records[records.length - 2] : null;
+export function exerciseProgressMeta(workouts, partKey, exercise, mode = DEFAULT_EXERCISE_MODE) {
+  const series = buildExerciseSeries(workouts, partKey, exercise, mode, 'session');
+  if (series.length === 0) return null;
+
   const unit = mode.weight ? 'kg' : '个';
-  const fmt = (v) => (mode.weight ? formatStepValue(v, 1) : String(v));
-  const main = `最高 ${fmt(latest.value)}${unit}`;
-  if (!previous) {
-    return { main, sub: friendlyDay(dayKey(latest.ts)) };
+  const fmt = (v) => (mode.weight ? formatStepValue(v, 1) : String(Math.round(v)));
+  const latest = series[series.length - 1];
+  const prev = series.length > 1 ? series[series.length - 2] : null;
+  const best = series.reduce((mx, p) => Math.max(mx, p.value), 0);
+  const spark = series.slice(-8).map((p) => p.value);
+
+  // 最近一次真正加码（创新高）的间隔
+  let lastPr = null;
+  let prevPr = null;
+  let runBest = 0;
+  for (const p of series) {
+    if (p.value > runBest) {
+      prevPr = lastPr;
+      lastPr = p;
+      runBest = p.value;
+    }
+  }
+  let pace = null;
+  if (lastPr && prevPr) {
+    const days = daysBetween(prevPr.ts, lastPr.ts);
+    if (days > 0) pace = `约 ${days} 天加码`;
   }
 
-  const delta = latest.value - previous.value;
-  const days = daysBetween(previous.ts, latest.ts);
+  const main = `${fmt(latest.value)}${unit}`;
+  let sub = friendlyDay(dayKey(latest.ts));
+  let delta = null;
+  if (prev) {
+    delta = latest.value - prev.value;
+    if (delta > 0) sub = `近次 +${fmt(delta)}${unit}`;
+    else if (delta < 0) sub = `近次 ${fmt(delta)}${unit}`;
+    else sub = '近次持平';
+  }
+  if (pace) sub = `${sub} · ${pace}`;
+
   return {
     main,
-    sub: `+${fmt(delta)}${unit} · ${days}天`,
-    detail: `上次 ${fmt(previous.value)}${unit} ${friendlyDay(dayKey(previous.ts))}`,
+    sub,
+    detail: best > 0 ? `历史最高 ${fmt(best)}${unit}` : null,
+    spark,
+    latest: latest.value,
+    best,
+    unit,
+    delta,
+    pace,
+    count: series.length,
   };
 }
