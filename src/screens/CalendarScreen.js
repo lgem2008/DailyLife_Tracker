@@ -178,7 +178,7 @@ export default function CalendarScreen({
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [editingActivity, setEditingActivity] = useState(null);
   const expandAnim = useRef(new Animated.Value(0)).current;
-  // 整个手指按在日历区期间锁住外层分页（不按 pan 生命周期分段，避免 touch/pan 交错提前解锁）
+  // 整个手指按在日历网格区期间锁住外层分页（不按 pan 生命周期分段，避免 touch/pan 交错提前解锁）
   const pagerLockedRef = useRef(false);
 
   useEffect(() => {
@@ -215,7 +215,7 @@ export default function CalendarScreen({
     pagerLockedRef.current = false;
   }, []);
 
-  // 手指一落到日历区就锁住底部横向分页；抬手再放行
+  // 手指落到网格区就锁外层分页；抬手再放行。详情区不锁，左右滑仍可切 Tab
   const onCalendarTouchStart = () => {
     lockPager();
   };
@@ -224,36 +224,35 @@ export default function CalendarScreen({
     unlockPager();
   };
 
+  // 仅网格区：横向切月，纵向展开/收起
+  // capture + 低阈值：不必先“按住日期格”再滑，轻扫即可抢走 Pressable
   const calendarPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onStartShouldSetPanResponderCapture: () => false,
-      // 方向明确后立即抢权（含 capture）：横向切月，纵向展开/收起
       onMoveShouldSetPanResponder: (_, gs) => {
         const absX = Math.abs(gs.dx);
         const absY = Math.abs(gs.dy);
-        return (absX > 8 && absX > absY * 1.05) || (absY > 8 && absY > absX * 1.05);
+        return (absX > 4 && absX > absY * 0.9) || (absY > 6 && absY > absX * 1.05);
       },
       onMoveShouldSetPanResponderCapture: (_, gs) => {
         const absX = Math.abs(gs.dx);
         const absY = Math.abs(gs.dy);
-        return (absX > 8 && absX > absY * 1.05) || (absY > 8 && absY > absX * 1.05);
+        return (absX > 4 && absX > absY * 0.9) || (absY > 6 && absY > absX * 1.05);
       },
       onPanResponderGrant: () => {
-        // touchStart 通常已锁；这里兜底，防止个别平台未走到 touchStart
         lockPager();
       },
       onPanResponderRelease: (_, gs) => {
         const absX = Math.abs(gs.dx);
         const absY = Math.abs(gs.dy);
 
-        if (absX >= 36 && absX > absY * 1.15) {
+        if (absX >= 24 && absX > absY * 1.05) {
           stepMonth(gs.dx < 0 ? 1 : -1);
         } else if (absY >= 22 && absY > absX * 1.15) {
           // 下滑展开，上滑收起
           setExpanded(gs.dy > 0);
         }
-        // pan 结束后立刻放行；若随后还有 touchEnd，unlock 是幂等的
         unlockPager();
       },
       onPanResponderTerminate: () => {
@@ -430,7 +429,7 @@ export default function CalendarScreen({
           ))}
         </View>
 
-        {/* 日历手势区固定在顶部：按下即锁横向分页；明确方向后切月/展开收起 */}
+        {/* 仅网格区：按下即锁分页；轻扫即可切月/展开收起（不抢详情区） */}
         <View
           style={styles.calendarGestureZone}
           onTouchStart={onCalendarTouchStart}
@@ -449,7 +448,8 @@ export default function CalendarScreen({
                   style={styles.dayCell}
                   disabled={!cell.inMonth}
                   onPress={() => cell.key && setSelected(cell.key)}
-                  delayPressIn={80}
+                  // 拉长按压判定，避免轻扫被当成点选日期
+                  delayPressIn={160}
                 >
                   <Animated.View style={[styles.dayInner, { height: cellHeight }, isSel && styles.daySel, isToday && !isSel && styles.dayToday]}>
                     {!cell.inMonth ? null : (

@@ -361,6 +361,7 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
         )}
         {status === 'update' && (
           <View style={styles.updateBlock}>
+            <Text style={styles.updateFound}>发现新版本 {latestVersion}</Text>
             {!!releaseNotes && (
               <View style={styles.notesBox}>
                 <Text style={styles.notesTitle}>更新内容</Text>
@@ -376,10 +377,15 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
                   </Text>
                 </View>
               ) : (
-                <Text style={styles.updateBtnText}>
-                  发现新版本 {latestVersion} · 应用内下载安装
-                </Text>
+                <Text style={styles.updateBtnText}>应用内下载安装</Text>
               )}
+            </Pressable>
+            <Pressable
+              style={[styles.browserBtn, downloading && styles.browserBtnDisabled]}
+              onPress={() => openUrl(RELEASES_PAGE)}
+              disabled={downloading}
+            >
+              <Text style={styles.browserBtnText}>浏览器打开发布页</Text>
             </Pressable>
           </View>
         )}
@@ -466,9 +472,15 @@ const styles = createThemedStyles((colors) => ({
   checkBtnText: { fontSize: 14, fontWeight: '800', color: colors.primary },
   statusOk: { marginTop: 12, fontSize: 13, fontWeight: '700', color: colors.textSoft },
   statusError: { marginTop: 12, fontSize: 13, fontWeight: '700', color: colors.danger, lineHeight: 20 },
-  updateBlock: {},
+  updateBlock: { marginTop: 12 },
+  updateFound: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: 4,
+  },
   notesBox: {
-    marginTop: 12,
+    marginTop: 10,
     padding: 12,
     borderRadius: 14,
     backgroundColor: colors.primarySoft,
@@ -493,6 +505,15 @@ const styles = createThemedStyles((colors) => ({
     alignItems: 'center',
   },
   updateBtnText: { fontSize: 14, fontWeight: '800', color: colors.white },
+  browserBtn: {
+    marginTop: 10,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+  },
+  browserBtnDisabled: { opacity: 0.6 },
+  browserBtnText: { fontSize: 14, fontWeight: '800', color: colors.primary },
   updateProgress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   updateHint: { marginTop: 4 },
   hintActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
