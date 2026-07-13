@@ -83,19 +83,50 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           # 上一个 tag（按版本排序），用于截取本次提交
           PREV=$(git tag --sort=-v:refname | awk -v cur="$TAG" '$0!=cur{print; exit}')
-          {
-            echo "## 更新内容"
-            echo ""
-            if [ -n "$PREV" ]; then
-              git log "${PREV}..HEAD" --pretty=format:'- %s' --no-merges
-              echo ""
-            else
-              git log -20 --pretty=format:'- %s' --no-merges
-              echo ""
-            fi
-          } > release_notes.md
-          echo "---- release_notes.md ----"
-          cat release_notes.md
+          if [ -n "$PREV" ]; then
+            export RANGE="${PREV}..HEAD"
+          else
+            export RANGE=""
+          fi
+          # 优先用 commit 正文分点；没有正文时才用首行总结
+          node <<'NODE'
+          const { execFileSync } = require('child_process');
+          const fs = require('fs');
+          const range = process.env.RANGE || '';
+          const args = range
+            ? ['log', range, '--no-merges', '--pretty=format:%s%x00%b%x00']
+            : ['log', '-20', '--no-merges', '--pretty=format:%s%x00%b%x00'];
+          const raw = execFileSync('git', args, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+          const parts = raw.split('\0');
+          const items = [];
+          for (let i = 0; i + 1 < parts.length; i += 2) {
+            const subject = String(parts[i] || '').trim();
+            if (!subject && !String(parts[i + 1] || '').trim()) continue;
+            const body = String(parts[i + 1] || '');
+            const bullets = body
+              .split(/\r?\n/)
+              .map((l) => l.trim())
+              .filter(Boolean)
+              .map((l) => l.replace(/^[-*•]\s+/, '').replace(/^\d+[\.)]\s+/, '').trim())
+              .filter((l) => l.length >= 2);
+            if (bullets.length > 0) {
+              for (const b of bullets) items.push(b);
+            } else if (subject) {
+              items.push(subject);
+            }
+          }
+          const seen = new Set();
+          const out = [];
+          for (const it of items) {
+            if (seen.has(it)) continue;
+            seen.add(it);
+            out.push(it);
+            if (out.length >= 30) break;
+          }
+          const md = ['## 更新内容', '', ...out.map((l) => '- ' + l), ''].join('\n');
+          fs.writeFileSync('release_notes.md', md);
+          console.log(md);
+          NODE
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

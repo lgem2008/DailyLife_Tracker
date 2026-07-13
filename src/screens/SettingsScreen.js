@@ -22,12 +22,16 @@ const API_MIRRORS = [
   `https://gh-proxy.com/https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
 ];
 
-// 直链失败时依次尝试镜像（国内访问 GitHub Releases 更稳）
+// 下载源：原链 + 公共镜像。真正下载前会测速排序，不再死板串行「原链优先」
 const DOWNLOAD_PROXIES = [
   '',
   'https://ghproxy.net/',
   'https://gh-proxy.com/',
 ];
+
+// 测速时只拉前 64KB，避免拖慢真正下载
+const PROBE_RANGE_END = 64 * 1024 - 1;
+const PROBE_TIMEOUT_MS = 4500;
 
 // FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK
 const INSTALL_INTENT_FLAGS = 1 | 0x10000000;
@@ -36,6 +40,14 @@ function fetchWithTimeout(url, opts = {}, ms = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+function sourceLabel(url) {
+  if (!url) return '未知源';
+  if (url.includes('ghproxy.net')) return '镜像 ghproxy';
+  if (url.includes('gh-proxy.com')) return '镜像 gh-proxy';
+  if (url.includes('github.com') || url.includes('githubusercontent.com')) return 'GitHub 原链';
+  return '备用源';
 }
 
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
@@ -68,6 +80,73 @@ function buildDownloadCandidates(rawUrl) {
     if (!urls.includes(next)) urls.push(next);
   }
   return urls;
+}
+
+// 对单个下载源做小流量测速：延迟 + 吞吐
+async function probeDownloadSource(url, ms = PROBE_TIMEOUT_MS) {
+  const start = Date.now();
+  try {
+    const res = await fetchWithTimeout(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/octet-stream',
+        Range: `bytes=0-${PROBE_RANGE_END}`,
+      },
+    }, ms);
+    // 206 部分内容 / 200 整包（部分代理不支持 Range）
+    if (!(res.ok || res.status === 206)) {
+      throw new Error(`http ${res.status}`);
+    }
+    const buf = await res.arrayBuffer();
+    const elapsed = Math.max(1, Date.now() - start);
+    const bytes = buf?.byteLength || 0;
+    // 过小多半是错误页 / 拦截页
+    if (bytes < 2048) throw new Error(`probe too small (${bytes})`);
+    // 不支持 Range 时可能回了超大 body：只按已读字节计，超时保护已由 abort 兜底
+    const speed = bytes / elapsed; // B/ms ≈ KB/s
+    return {
+      url,
+      ok: true,
+      elapsed,
+      bytes,
+      speed,
+      // 综合分：吞吐优先，延迟略作惩罚
+      score: speed - elapsed * 0.02,
+      label: sourceLabel(url),
+    };
+  } catch (e) {
+    return {
+      url,
+      ok: false,
+      elapsed: Math.max(1, Date.now() - start),
+      bytes: 0,
+      speed: 0,
+      score: -1,
+      label: sourceLabel(url),
+      error: e,
+    };
+  }
+}
+
+// 并行测速，按 score 降序；全失败则退回原顺序
+async function rankDownloadCandidates(urls) {
+  if (!urls || urls.length === 0) return [];
+  if (urls.length === 1) return urls;
+  const results = await Promise.all(urls.map((url) => probeDownloadSource(url)));
+  const ok = results.filter((r) => r.ok).sort((a, b) => b.score - a.score);
+  console.log('[update] probe results', results.map((r) => ({
+    label: r.label,
+    ok: r.ok,
+    ms: r.elapsed,
+    kbps: r.ok ? Math.round(r.speed) : 0,
+  })));
+  if (ok.length === 0) return urls;
+  const ranked = ok.map((r) => r.url);
+  // 测速失败的源垫后，仍作兜底
+  for (const url of urls) {
+    if (!ranked.includes(url)) ranked.push(url);
+  }
+  return ranked;
 }
 
 // 把 GitHub Release markdown 正文收成可读的要点列表
@@ -119,6 +198,9 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
   const [releaseNotes, setReleaseNotes] = useState([]);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  // probing | downloading | installing | ''
+  const [downloadPhase, setDownloadPhase] = useState('');
+  const [downloadSource, setDownloadSource] = useState('');
   const [installError, setInstallError] = useState('');
 
   const toggleFitnessPriority = () => {
@@ -219,15 +301,29 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
 
     setDownloading(true);
     setDownloadProgress(0);
+    setDownloadPhase('probing');
+    setDownloadSource('');
     setInstallError('');
 
-    const candidates = buildDownloadCandidates(downloadUrl);
+    const rawCandidates = buildDownloadCandidates(downloadUrl);
     let lastError = null;
     let downloadedFile = null;
 
     try {
+      // 先并行测速，选当前网络下最快的源；失败再按排名依次兜底
+      let candidates = rawCandidates;
+      try {
+        candidates = await rankDownloadCandidates(rawCandidates);
+      } catch (e) {
+        console.warn('[update] probe rank failed, fallback order', e);
+        candidates = rawCandidates;
+      }
+
+      setDownloadPhase('downloading');
       for (const url of candidates) {
         try {
+          setDownloadSource(sourceLabel(url));
+          setDownloadProgress(0);
           const destination = new File(Paths.cache, 'update.apk');
           // createDownloadTask 不覆盖已有文件，先清掉上次残留
           if (destination.exists) {
@@ -262,6 +358,7 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
         throw lastError || new Error('all download mirrors failed');
       }
 
+      setDownloadPhase('installing');
       try {
         await launchApkInstaller(downloadedFile);
       } catch (e) {
@@ -273,6 +370,8 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
       setInstallError('应用内下载失败。可重试，或允许安装未知应用后再次下载。');
     } finally {
       setDownloading(false);
+      setDownloadPhase('');
+      setDownloadSource('');
     }
   }, [downloadUrl, downloading, launchApkInstaller]);
 
@@ -424,7 +523,13 @@ export default function SettingsScreen({ settings, onChangeSettings }) {
                 <View style={styles.updateProgress}>
                   <ActivityIndicator size="small" color="#fff" />
                   <Text style={styles.updateBtnText}>
-                    {downloadProgress >= 100 ? '正在打开安装…' : `下载中 ${downloadProgress}%`}
+                    {downloadPhase === 'probing'
+                      ? '测速选源中…'
+                      : downloadPhase === 'installing' || downloadProgress >= 100
+                        ? '正在打开安装…'
+                        : downloadSource
+                          ? `下载中 ${downloadProgress}% · ${downloadSource}`
+                          : `下载中 ${downloadProgress}%`}
                   </Text>
                 </View>
               ) : (
