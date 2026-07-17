@@ -10,7 +10,7 @@ import {
   clampSetCount,
   modeSummary,
 } from './utils';
-import { SetRow, StepperField } from './fields';
+import { StepperField, QuickSetRow } from './fields';
 import { WeightChart } from './charts';
 import { ExerciseHistory } from './history';
 import styles from './styles';
@@ -445,9 +445,9 @@ function EditWorkoutModal({ workout, noWeight, mode, onSave, onCancel }) {
           </View>
         )}
         <Text style={styles.modalLabel}>组数</Text>
-        <ScrollView style={{ maxHeight: 260 }} keyboardShouldPersistTaps="handled">
+        <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled">
           {sets.map((s, i) => (
-            <SetRow
+            <QuickSetRow
               key={i}
               index={i}
               set={s}

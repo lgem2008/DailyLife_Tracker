@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, ScrollView, Pressable, Animated, Alert, TextInput, Modal,
+  View, Text, ScrollView, Pressable, Animated, Alert, Modal,
   PanResponder,
 } from 'react-native';
 import { confirmAction } from '../confirm';
 import { colors, getShadow, createThemedStyles, getTileColor } from '../theme';
 import ActivityEditModal from '../components/ActivityEditModal';
 import MiniCalendar from '../components/MiniCalendar';
+import { StepperField } from '../fitness/fields';
 import {
   dayKey, todayKey, friendlyDay, hhmm, monthGrid, monthLabel, WEEK_SHORT,
 } from '../date';
@@ -28,6 +29,7 @@ function dateKeyOf(ts) {
 function WorkoutEditModal({ visible, workout, onClose, onSave }) {
   const [sets, setSets] = useState([]);
   const [dateText, setDateText] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
     if (!visible || !workout) return;
@@ -36,6 +38,7 @@ function WorkoutEditModal({ visible, workout, onClose, onSave }) {
       reps: s.reps != null ? String(s.reps) : '',
     })));
     setDateText(dateKeyOf(workout.ts));
+    setShowDatePicker(false);
   }, [visible, workout]);
 
   const kbHeight = useKeyboardHeight();
@@ -88,11 +91,25 @@ function WorkoutEditModal({ visible, workout, onClose, onSave }) {
           <Text style={styles.editSub}>{part ? part.label : '记录'} · {sets.length} 组</Text>
 
           <Text style={styles.editFieldLabel}>日期</Text>
-          <MiniCalendar
-            selected={dateText}
-            maxKey={todayKey()}
-            onPick={setDateText}
-          />
+          <Pressable
+            style={styles.editDateBtn}
+            onPress={() => setShowDatePicker((v) => !v)}
+          >
+            <Text style={styles.editDateText}>{friendlyDay(dateText)}</Text>
+            <Text style={styles.editDateArrow}>{showDatePicker ? '▲' : '▼'}</Text>
+          </Pressable>
+          {showDatePicker && (
+            <View style={styles.editCalendarWrap}>
+              <MiniCalendar
+                selected={dateText}
+                maxKey={todayKey()}
+                onPick={(key) => {
+                  setDateText(key);
+                  setShowDatePicker(false);
+                }}
+              />
+            </View>
+          )}
 
           <Text style={styles.editFieldLabel}>每组</Text>
           <ScrollView style={styles.editSetBox} keyboardShouldPersistTaps="handled">
@@ -101,27 +118,26 @@ function WorkoutEditModal({ visible, workout, onClose, onSave }) {
                 <Text style={styles.editSetNo}>{idx + 1}</Text>
                 {showWeight && (
                   <View style={styles.editSetField}>
-                    <TextInput
-                      style={styles.editSetInput}
+                    <Text style={styles.editSetLabel}>kg</Text>
+                    <StepperField
                       value={s.weight}
-                      onChangeText={(v) => updateSet(idx, { weight: v.replace(/[^0-9.]/g, '') })}
-                      placeholder="重量"
-                      placeholderTextColor={colors.textSoft}
+                      step={2.5}
+                      decimals={1}
                       keyboardType="decimal-pad"
+                      placeholder="重量"
+                      onChange={(v) => updateSet(idx, { weight: v.replace(/[^0-9.]/g, '') })}
                     />
-                    <Text style={styles.editSetUnit}>kg</Text>
                   </View>
                 )}
                 <View style={styles.editSetField}>
-                  <TextInput
-                    style={styles.editSetInput}
+                  <Text style={styles.editSetLabel}>{showWeight ? '次数' : '个数'}</Text>
+                  <StepperField
                     value={s.reps}
-                    onChangeText={(v) => updateSet(idx, { reps: v.replace(/[^0-9]/g, '') })}
-                    placeholder="次数"
-                    placeholderTextColor={colors.textSoft}
+                    step={1}
                     keyboardType="number-pad"
+                    placeholder={showWeight ? '次数' : '个数'}
+                    onChange={(v) => updateSet(idx, { reps: v.replace(/[^0-9]/g, '') })}
                   />
-                  <Text style={styles.editSetUnit}>{showWeight ? '次' : '个'}</Text>
                 </View>
                 <Pressable style={styles.editSetDel} onPress={() => removeSet(idx)} hitSlop={8}>
                   <Text style={styles.editSetDelText}>✕</Text>
@@ -797,23 +813,25 @@ const styles = createThemedStyles((colors) => ({
   editTitle: { fontSize: 20, fontWeight: '800', color: colors.text },
   editSub: { fontSize: 13, fontWeight: '700', color: colors.textSoft, marginTop: 4, marginBottom: 8 },
   editFieldLabel: { fontSize: 13, fontWeight: '700', color: colors.textSoft, marginTop: 12, marginBottom: 8 },
-  editTimeInput: {
+  editDateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.card,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
   },
-  editSetBox: { maxHeight: 260 },
+  editDateText: { flex: 1, fontSize: 15, fontWeight: '800', color: colors.text },
+  editDateArrow: { fontSize: 11, fontWeight: '800', color: colors.textSoft },
+  editCalendarWrap: { marginTop: 8 },
+  editSetBox: { maxHeight: 300 },
   editSetRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.card,
     borderRadius: 14,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     marginBottom: 8,
     gap: 8,
   },
@@ -828,20 +846,14 @@ const styles = createThemedStyles((colors) => ({
     fontWeight: '800',
     fontSize: 13,
   },
-  editSetField: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  editSetInput: {
-    flex: 1,
-    minWidth: 0,
-    backgroundColor: colors.bg,
-    borderRadius: 10,
-    paddingVertical: 9,
-    paddingHorizontal: 10,
+  editSetField: { flex: 1, minWidth: 0 },
+  editSetLabel: {
+    fontSize: 11,
+    color: colors.textSoft,
+    fontWeight: '800',
+    marginBottom: 5,
     textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
   },
-  editSetUnit: { fontSize: 13, color: colors.textSoft, fontWeight: '700' },
   editSetDel: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   editSetDelText: { fontSize: 15, color: colors.textSoft, fontWeight: '800' },
   editAddSet: {

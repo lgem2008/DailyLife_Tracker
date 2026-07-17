@@ -2,6 +2,22 @@
 
 一个可爱风的日常打卡小 App。首页是一排带 emoji 的大按钮，点一下就记下今天做了这件事；日历页按天用彩色 emoji 直观回看做过什么。数据全部存在手机本地，不联网、不登录、不上传。
 
+## 技术栈
+
+| 层级 | 选型 | 说明 |
+| ---- | ---- | ---- |
+| 框架 | [Expo](https://expo.dev) SDK 57 | 开发、调试与原生打包 |
+| UI | React 19 + React Native 0.86 | 跨端界面；开启 New Architecture |
+| 语言 | JavaScript（无 TypeScript） | 入口 `index.js` / `App.js`，业务在 `src/` |
+| 布局 | `react-native-safe-area-context` | 安全区适配 |
+| 本地存储 | 原生：`expo-file-system`（JSON 文件）<br>Web：`localStorage` | 全部本机，无后端、无账号 |
+| 其他 Expo 模块 | `expo-haptics` / `expo-status-bar` / `expo-intent-launcher` / `@expo/vector-icons` | 震动反馈、状态栏、打开系统意图、图标 |
+| Web 调试 | `react-native-web` | `expo start --web` |
+| 安卓产物 | 仓库内 `android/` + Gradle | `assembleRelease` 打 release APK |
+| 构建工具 | Node.js 18+、Babel（`babel-preset-expo`）、Metro | 可选 EAS（见 `eas.json`） |
+
+不依赖导航库、状态管理库或远程数据库：页面由根组件自管分页/Tab，状态用 React hooks，数据读写走本地 JSON。
+
 ## 功能
 - 记录：emoji 大按钮，轻点即记录，同一件事一天可多次，按钮当天次数有小角标。
 - 日历：按天时间线，用彩色 emoji 胶囊展示当天做了什么，长按可删单条。
