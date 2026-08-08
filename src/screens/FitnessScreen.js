@@ -29,6 +29,8 @@ import {
   ExerciseCreateSheet,
   EditWorkoutModal,
 } from '../fitness/sheets';
+import MeasureSheet from '../fitness/MeasureSheet';
+import { MEASURE_UNIT, SITE_MAP, fmtMeasure, siteSummary } from '../fitness/measures';
 import {
   DraggableRow,
   ExerciseGridTile,
@@ -39,11 +41,12 @@ import {
 import styles from '../fitness/styles';
 
 export default function FitnessScreen({
-  workouts, exercises, memory = {}, bodyWeight = [],
+  workouts, exercises, memory = {}, bodyWeight = [], measures = [],
   settings = {}, onChangeSettings,
   onAddWorkout, onDeleteWorkout, onUpdateWorkout,
   onAddExercise, onDeleteExercise, onReorderExercises, onRenameExercise, onUpdateMemory,
-  onAddBodyWeight, onDeleteBodyWeight, registerBack, resetSignal,
+  onAddBodyWeight, onDeleteBodyWeight,
+  onAddMeasure, onDeleteMeasure, registerBack, resetSignal,
 }) {
   const { width: viewportWidth } = useWindowDimensions();
   const [part, setPart] = useState(null);
@@ -62,6 +65,10 @@ export default function FitnessScreen({
   const [bwInput, setBwInput] = useState('');
   const [bwDate, setBwDate] = useState(todayKey());
   const [bwOpen, setBwOpen] = useState(false);
+  const [measureOpen, setMeasureOpen] = useState(false);
+  const [measureSite, setMeasureSite] = useState(null);
+  const [measureInput, setMeasureInput] = useState('');
+  const [measureDate, setMeasureDate] = useState(todayKey());
   const exerciseScrollRef = useRef(null);
 
   const resetToFitnessHome = useCallback(() => {
@@ -76,8 +83,12 @@ export default function FitnessScreen({
     setPartDragIdx(null);
     setEditingWorkout(null);
     setBwOpen(false);
+    setMeasureOpen(false);
+    setMeasureSite(null);
+    setMeasureInput('');
     setRecordDate(todayKey());
     setBwDate(todayKey());
+    setMeasureDate(todayKey());
   }, []);
 
   useEffect(() => {
@@ -93,12 +104,13 @@ export default function FitnessScreen({
       if (editingExercise) { setEditingExercise(null); setCreateOpen(false); return true; }
       if (createOpen) { setCreateOpen(false); return true; }
       if (bwOpen) { setBwOpen(false); return true; }
+      if (measureOpen) { setMeasureOpen(false); return true; }
       if (exercise) { setExercise(null); return true; }
       if (part) { setPart(null); return true; }
       return false;
     });
     return () => registerBack(null);
-  }, [registerBack, editingWorkout, editingExercise, createOpen, bwOpen, exercise, part]);
+  }, [registerBack, editingWorkout, editingExercise, createOpen, bwOpen, measureOpen, exercise, part]);
 
   const openPart = (p) => {
     select();
@@ -358,6 +370,44 @@ export default function FitnessScreen({
     });
   };
 
+  // 维度：最近一次记录，给入口行做徽章
+  const measureBadge = useMemo(() => {
+    if (!measures || measures.length === 0) return null;
+    const last = measures.reduce((mx, m) => (!mx || m.ts > mx.ts ? m : mx), null);
+    if (!last) return null;
+    return `${SITE_MAP[last.site]?.short || ''} ${fmtMeasure(last.value)}${MEASURE_UNIT}`.trim();
+  }, [measures]);
+
+  // 切换测量部位时，输入框预填上次的值，方便微调
+  const pickMeasureSite = useCallback((key) => {
+    setMeasureSite(key);
+    const sum = siteSummary(measures, key);
+    setMeasureInput(sum ? fmtMeasure(sum.last.value) : '');
+  }, [measures]);
+
+  const openMeasure = useCallback(() => {
+    select();
+    setMeasureDate(todayKey());
+    setMeasureOpen(true);
+  }, []);
+
+  // 保存后不关面板：一次量身通常要记好几处
+  const saveMeasure = useCallback(() => {
+    const v = parseFloat(measureInput);
+    if (!measureSite || Number.isNaN(v) || v <= 0) return;
+    success();
+    onAddMeasure(measureSite, Number(formatStepValue(v, 1)), makeDatedIso(measureDate));
+  }, [measureSite, measureInput, measureDate, onAddMeasure]);
+
+  const deleteMeasureEntry = (id) => {
+    confirmAction({
+      title: '删除这条围度',
+      confirmText: '删除',
+      destructive: true,
+      onConfirm: () => onDeleteMeasure(id),
+    });
+  };
+
   // ---- Level 1: body parts list ----
   if (!part) {
     return (
@@ -365,7 +415,7 @@ export default function FitnessScreen({
       <View style={{ flex: 1 }}>
       <ScrollView
         style={styles.screen}
-        contentContainerStyle={[styles.content, bwOpen && styles.contentWithSheet]}
+        contentContainerStyle={[styles.content, (bwOpen || measureOpen) && styles.contentWithSheet]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={partDragIdx === null && !gridDragging}
@@ -445,8 +495,40 @@ export default function FitnessScreen({
           </View>
         </Pressable>
 
-        <FitnessStats workouts={workouts} bodyWeight={bodyWeight} settings={settings} />
+        <Pressable onPress={openMeasure}>
+          <View style={[styles.partRow, styles.measureRowTile, getShadow()]}>
+            <Text style={styles.partEmoji}>📐</Text>
+            <Text style={styles.partLabel}>身体维度</Text>
+            {!!measureBadge && (
+              <View style={styles.partBadge}>
+                <Text style={styles.partBadgeText}>{measureBadge}</Text>
+              </View>
+            )}
+            <Text style={styles.partArrow}>›</Text>
+          </View>
+        </Pressable>
+
+        <FitnessStats
+          workouts={workouts}
+          bodyWeight={bodyWeight}
+          measures={measures}
+          settings={settings}
+        />
       </ScrollView>
+      {measureOpen && (
+        <MeasureSheet
+          measures={measures}
+          site={measureSite}
+          onChangeSite={pickMeasureSite}
+          value={measureInput}
+          onChangeValue={setMeasureInput}
+          dateKey={measureDate}
+          onChangeDate={setMeasureDate}
+          onSave={saveMeasure}
+          onDelete={deleteMeasureEntry}
+          onClose={() => setMeasureOpen(false)}
+        />
+      )}
       {bwOpen && (
         <BodyWeightSheet
           value={bwInput}

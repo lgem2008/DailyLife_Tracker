@@ -20,6 +20,7 @@ const K_WORKOUTS = 'dlt_workouts';
 const K_EXERCISES = 'dlt_exercises';
 const K_MEMORY = 'dlt_exercise_memory';
 const K_BODYWEIGHT = 'dlt_bodyweight';
+const K_MEASURES = 'dlt_measures';
 const K_SETTINGS = 'dlt_settings';
 
 // 数据 schema 版本：后续结构变更可据此迁移
@@ -68,6 +69,7 @@ if (Platform.OS !== 'web') {
     [K_EXERCISES]: new File(DATA_DIR, 'exercises.json'),
     [K_MEMORY]: new File(DATA_DIR, 'memory.json'),
     [K_BODYWEIGHT]: new File(DATA_DIR, 'bodyweight.json'),
+    [K_MEASURES]: new File(DATA_DIR, 'measures.json'),
     [K_SETTINGS]: new File(DATA_DIR, 'settings.json'),
   };
   const ensureDir = () => {
@@ -235,6 +237,34 @@ export async function loadBodyWeight() {
 
 export async function saveBodyWeight(list) {
   writeDebounced(K_BODYWEIGHT, list);
+}
+
+// ---- 身体维度（围度）----
+// 记录结构：{ id, ts(ISO), site, value(cm) }
+// goal: 'up' 越大越好（肌肉），'down' 越小越好（腰腹）
+export const MEASURE_SITES = [
+  { key: 'neck', label: '颈围', short: '颈', goal: 'up', step: 0.5 },
+  { key: 'shoulder', label: '肩宽', short: '肩', goal: 'up', step: 0.5 },
+  { key: 'chest', label: '胸围', short: '胸', goal: 'up', step: 0.5 },
+  { key: 'waist', label: '腰围', short: '腰', goal: 'down', step: 0.5 },
+  { key: 'hip', label: '臀围', short: '臀', goal: 'up', step: 0.5 },
+  { key: 'armL', label: '左臂围', short: '左臂', goal: 'up', step: 0.5 },
+  { key: 'armR', label: '右臂围', short: '右臂', goal: 'up', step: 0.5 },
+  { key: 'forearmL', label: '左小臂', short: '左小臂', goal: 'up', step: 0.5 },
+  { key: 'forearmR', label: '右小臂', short: '右小臂', goal: 'up', step: 0.5 },
+  { key: 'thighL', label: '左腿围', short: '左腿', goal: 'up', step: 0.5 },
+  { key: 'thighR', label: '右腿围', short: '右腿', goal: 'up', step: 0.5 },
+  { key: 'calfL', label: '左小腿', short: '左小腿', goal: 'up', step: 0.5 },
+  { key: 'calfR', label: '右小腿', short: '右小腿', goal: 'up', step: 0.5 },
+];
+
+export async function loadMeasures() {
+  const data = store.read(K_MEASURES, []);
+  return Array.isArray(data) ? data : [];
+}
+
+export async function saveMeasures(list) {
+  writeDebounced(K_MEASURES, list);
 }
 
 // ---- 应用设置 ----

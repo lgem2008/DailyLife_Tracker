@@ -12,6 +12,14 @@ import {
   exerciseProgressMeta,
   DEFAULT_EXERCISE_MODE,
 } from './utils';
+import {
+  MEASURE_UNIT,
+  SITE_MAP,
+  fmtMeasure,
+  deltaLabel,
+  deltaTone,
+  measureHighlights,
+} from './measures';
 import styles from './styles';
 
 // 列表用迷你柱：高度 22，最多 8 根
@@ -128,7 +136,7 @@ function ProgressChart({ workouts, part, exercise, noWeight, mode, embedded = fa
 }
 
 // 首页统计：速览 + 动作进展（点选动作看图，不必进动作页）
-function FitnessStats({ workouts, bodyWeight, settings }) {
+function FitnessStats({ workouts, bodyWeight, measures, settings }) {
   const partMap = useMemo(() => {
     const map = {};
     for (const p of BODY_PARTS) map[p.key] = p;
@@ -207,7 +215,9 @@ function FitnessStats({ workouts, bodyWeight, settings }) {
     return { last: list[list.length - 1], prev: list.length > 1 ? list[list.length - 2] : null };
   }, [bodyWeight]);
 
-  if ((workouts || []).length === 0 && (bodyWeight || []).length === 0) {
+  const measureRows = useMemo(() => measureHighlights(measures, 3), [measures]);
+
+  if ((workouts || []).length === 0 && (bodyWeight || []).length === 0 && (measures || []).length === 0) {
     return (
       <View style={[styles.statsCard, getShadow()]}>
         <Text style={styles.statsTitle}>统计</Text>
@@ -248,6 +258,24 @@ function FitnessStats({ workouts, bodyWeight, settings }) {
         <Text style={styles.statsBwLine}>
           体重 {bw.last.value}kg{bwDelta ? ` · ${bwDelta}` : ''}
         </Text>
+      )}
+
+      {measureRows.length > 0 && (
+        <View style={styles.statsMeasureRow}>
+          {measureRows.map((row) => {
+            const tone = deltaTone(row.delta, row.goal, colors);
+            const dl = deltaLabel(row.delta);
+            return (
+              <View key={row.site} style={styles.statsMeasureChip}>
+                <Text style={styles.statsMeasureName}>{SITE_MAP[row.site]?.short || row.site}</Text>
+                <Text style={styles.statsMeasureVal}>
+                  {fmtMeasure(row.last.value)}{MEASURE_UNIT}
+                </Text>
+                {!!dl && <Text style={[styles.statsMeasureDelta, { color: tone }]}>{dl}</Text>}
+              </View>
+            );
+          })}
+        </View>
       )}
 
       <View style={styles.progressSection}>
@@ -325,8 +353,8 @@ function FitnessStats({ workouts, bodyWeight, settings }) {
   );
 }
 
-// 体重趋势柱状图
-function WeightChart({ data }) {
+// 数值趋势柱状图（体重 / 围度共用）：柱高按区间归一，只看相对变化
+function TrendChart({ data, label = '趋势', unit = 'kg', embedded = false }) {
   if (!data || data.length < 1) return null;
   const recent = data.slice(-12);
   const values = recent.map((d) => d.value);
@@ -334,10 +362,10 @@ function WeightChart({ data }) {
   const min = Math.min(...values);
   const range = max - min;
   return (
-    <View style={styles.chartWrap}>
-      <Text style={styles.chartLabel}>体重趋势</Text>
+    <View style={[styles.chartWrap, embedded && styles.chartWrapEmbedded]}>
+      <Text style={styles.chartLabel}>{label}</Text>
       <View style={styles.chartBox}>
-        <Text style={styles.chartYMax}>{max}kg</Text>
+        <Text style={styles.chartYMax}>{formatStepValue(max, 1)}{unit}</Text>
         <View style={styles.chartBars}>
           {recent.map((d, i) => {
             const frac = range > 0 ? (d.value - min) / range : 0.5;
@@ -345,7 +373,7 @@ function WeightChart({ data }) {
             const isLast = i === recent.length - 1;
             return (
               <View key={d.day + '_' + i} style={styles.chartCol}>
-                <Text style={styles.chartVal}>{d.value}</Text>
+                <Text style={styles.chartVal}>{formatStepValue(d.value, 1)}</Text>
                 <View style={[styles.chartBar, { height: h, backgroundColor: isLast ? colors.primary : colors.primarySoft }]} />
                 <Text style={styles.chartDay}>{d.day.slice(5)}</Text>
               </View>
@@ -357,4 +385,8 @@ function WeightChart({ data }) {
   );
 }
 
-export { FitnessStats, ProgressChart, WeightChart, Sparkline };
+function WeightChart({ data }) {
+  return <TrendChart data={data} label="体重趋势" unit="kg" />;
+}
+
+export { FitnessStats, ProgressChart, WeightChart, TrendChart, Sparkline };

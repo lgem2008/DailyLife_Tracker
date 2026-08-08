@@ -42,6 +42,35 @@ const styles = createThemedStyles((colors) => ({
     padding: 12, marginBottom: 12,
   },
   bwSheetHistory: { marginTop: 2 },
+
+  // 身体维度
+  measureRowTile: { backgroundColor: getTileColor('#CFE4F5'), marginTop: 0 },
+  measureInputBox: {
+    backgroundColor: colors.bg, borderRadius: 16,
+    padding: 12, marginBottom: 12,
+  },
+  measureListTitle: { fontSize: 14, fontWeight: '800', color: colors.textSoft, marginBottom: 8 },
+  measureList: { gap: 6, marginBottom: 12 },
+  measureRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.bg, borderRadius: 12,
+    paddingVertical: 9, paddingHorizontal: 12,
+  },
+  measureRowOn: {
+    borderWidth: 1.5, borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  measureRowName: { flex: 1, minWidth: 0, fontSize: 14, fontWeight: '800', color: colors.text },
+  measureRowVal: { fontSize: 14, fontWeight: '900', color: colors.text },
+  measureRowDelta: { fontSize: 11, fontWeight: '800', minWidth: 52, textAlign: 'right' },
+  statsMeasureRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  statsMeasureChip: {
+    flex: 1, backgroundColor: colors.bg, borderRadius: 12,
+    paddingVertical: 8, paddingHorizontal: 8,
+  },
+  statsMeasureName: { fontSize: 11, fontWeight: '800', color: colors.textSoft },
+  statsMeasureVal: { fontSize: 15, fontWeight: '900', color: colors.text, marginTop: 2 },
+  statsMeasureDelta: { fontSize: 10, fontWeight: '800', marginTop: 2 },
   bwItem: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.line,

@@ -9,7 +9,9 @@ import { colors, createThemedStyles, setThemeMode } from './src/theme';
 import {
   loadActivities, saveActivities, loadLogs, saveLogs,
   loadWorkouts, saveWorkouts, loadExercises, saveExercises,
-  loadMemory, saveMemory, loadBodyWeight, saveBodyWeight, loadSettings, saveSettings, newId,
+  loadMemory, saveMemory, loadBodyWeight, saveBodyWeight,
+  loadMeasures, saveMeasures, loadSettings, saveSettings, newId,
+  MEASURE_SITES,
 } from './src/storage';
 import { dayKey } from './src/date';
 import HomeScreen from './src/screens/HomeScreen';
@@ -27,6 +29,7 @@ export default function App() {
   const [exercises, setExercises] = useState({});
   const [memory, setMemory] = useState({});
   const [bodyWeight, setBodyWeight] = useState([]);
+  const [measures, setMeasures] = useState([]);
   const [settings, setSettings] = useState({ fitnessPriorityMode: false, darkMode: false });
   const [loading, setLoading] = useState(true);
   const [fitnessResetSignal, setFitnessResetSignal] = useState(0);
@@ -45,13 +48,14 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [a, l, w, e, m, bw, s] = await Promise.all([
+      const [a, l, w, e, m, bw, ms, s] = await Promise.all([
         loadActivities(),
         loadLogs(),
         loadWorkouts(),
         loadExercises(),
         loadMemory(),
         loadBodyWeight(),
+        loadMeasures(),
         loadSettings(),
       ]);
       setActivities(a);
@@ -60,6 +64,7 @@ export default function App() {
       setExercises(e);
       setMemory(m);
       setBodyWeight(bw);
+      setMeasures(ms);
       setThemeMode(!!s.darkMode, s.lightTheme);
       setSettings(s);
       setTab(s.fitnessPriorityMode ? 'fitness' : 'home');
@@ -74,6 +79,7 @@ export default function App() {
   useEffect(() => { if (!loading) saveExercises(exercises); }, [exercises]);
   useEffect(() => { if (!loading) saveMemory(memory); }, [memory]);
   useEffect(() => { if (!loading) saveBodyWeight(bodyWeight); }, [bodyWeight]);
+  useEffect(() => { if (!loading) saveMeasures(measures); }, [measures]);
   useEffect(() => { if (!loading) saveSettings(settings); }, [settings]);
 
   const changeSettings = useCallback((nextSettings) => {
@@ -171,6 +177,16 @@ export default function App() {
 
   const deleteBodyWeight = useCallback((id) => {
     setBodyWeight((prev) => prev.filter((b) => b.id !== id));
+  }, []);
+
+  const addMeasure = useCallback((site, value, ts) => {
+    setMeasures((prev) => [...prev, { id: newId(), ts: ts || new Date().toISOString(), site, value }]);
+    const label = MEASURE_SITES.find((s) => s.key === site)?.label || '围度';
+    showToast(`📐 ${label} ${value}cm 已记录`);
+  }, [showToast]);
+
+  const deleteMeasure = useCallback((id) => {
+    setMeasures((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
   const deleteLogs = useCallback((ids) => {
@@ -317,6 +333,7 @@ export default function App() {
                 exercises={exercises}
                 memory={memory}
                 bodyWeight={bodyWeight}
+                measures={measures}
                 settings={settings}
                 onChangeSettings={changeSettings}
                 onAddWorkout={addWorkout}
@@ -329,6 +346,8 @@ export default function App() {
                 onUpdateMemory={updateMemory}
                 onAddBodyWeight={addBodyWeight}
                 onDeleteBodyWeight={deleteBodyWeight}
+                onAddMeasure={addMeasure}
+                onDeleteMeasure={deleteMeasure}
                 registerBack={registerBack}
                 resetSignal={fitnessResetSignal}
               />

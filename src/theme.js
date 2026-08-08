@@ -196,6 +196,14 @@ export function getTileBadgeColor() {
   return colorMode === 'dark' ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.85)';
 }
 
+// 给 hex 加透明度，用于在卡片上叠出淡色块（人体图等）
+export function withAlpha(hex, alpha) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return hex;
+  const a = Math.max(0, Math.min(1, alpha));
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`;
+}
+
 export function createThemedStyles(factory) {
   const cache = {};
   const styleKeys = Object.keys(factory(colors));
